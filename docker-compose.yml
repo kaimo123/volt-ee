@@ -1,0 +1,22 @@
+services:
+  forecaster:
+    build: .
+    container_name: volt-ee
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    environment:
+      # Millal ennustus uuendatakse (kohalik aeg)
+      RUN_TIMES: "06:15,14:15,20:15"
+      HORIZON_DAYS: "7"
+      TRAIN_START: "2025-02-09"
+
+  web:
+    image: nginx:alpine
+    container_name: volt-ee-web
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    volumes:
+      - ./data/public:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

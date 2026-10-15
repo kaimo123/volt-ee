@@ -1,0 +1,67 @@
+# Home Assistanti "package". Pane see faili /config/packages/volt_ee.yaml
+# ja lisa configuration.yaml-i (kui veel pole):
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Asenda SERVERI_IP oma serveri aadressiga.
+
+rest:
+  - resource: http://SERVERI_IP:8088/forecast.json
+    scan_interval: 900
+    sensor:
+      - name: "Elektrihind EE prognoos"
+        unique_id: volt_ee_price
+        unit_of_measurement: "€/MWh"
+        device_class: monetary
+        # Praeguse tunni hind: kinnitatud börsihind või prognoosi mediaan
+        value_template: >
+          {% set h = now().strftime('%Y-%m-%dT%H:00') %}
+          {% set r = value_json.hourly | selectattr('local','eq',h) | list | first | default(none) %}
+          {{ r.price if r else none }}
+        json_attributes:
+          - hourly
+          - daily
+          - meta
+
+template:
+  - sensor:
+      - name: "Elektrihind EE homme keskmine"
+        unique_id: volt_ee_tomorrow_avg
+        unit_of_measurement: "€/MWh"
+        state: >
+          {% set d = (now() + timedelta(days=1)).strftime('%Y-%m-%d') %}
+          {% set r = state_attr('sensor.elektrihind_ee_prognoos','daily') or [] %}
+          {% set x = r | selectattr('date','eq',d) | list | first | default(none) %}
+          {{ x.mean if x else none }}
+        attributes:
+          kinnitatud: >
+            {% set d = (now() + timedelta(days=1)).strftime('%Y-%m-%d') %}
+            {% set r = state_attr('sensor.elektrihind_ee_prognoos','daily') or [] %}
+            {% set x = r | selectattr('date','eq',d) | list | first | default(none) %}
+            {{ x.confirmed if x else false }}
+
+      - name: "Elektrihind EE odavaim päev"
+        unique_id: volt_ee_cheapest_day
+        # Järgmise 7 päeva odavaim päev (päeva keskmise järgi)
+        state: >
+          {% set r = state_attr('sensor.elektrihind_ee_prognoos','daily') or [] %}
+          {% set x = r | sort(attribute='mean') | first | default(none) %}
+          {{ x.date if x else none }}
+
+  - binary_sensor:
+      # Näide automaatika jaoks: kas praegune tund on päeva 6 odavama hulgas
+      - name: "Elektrihind EE odav tund"
+        unique_id: volt_ee_cheap_hour
+        state: >
+          {% set today = now().strftime('%Y-%m-%d') %}
+          {% set rows = (state_attr('sensor.elektrihind_ee_prognoos','hourly') or [])
+               | selectattr('local','search','^' ~ today) | list %}
+          {% set cheap = (rows | sort(attribute='price'))[:6] | map(attribute='local') | list %}
+          {{ now().strftime('%Y-%m-%dT%H:00') in cheap }}
+
+# Prognoosi atribuut on suur (~40 KB), ära salvesta seda andmebaasi
+recorder:
+  exclude:
+    entities:
+      - sensor.elektrihind_ee_prognoos

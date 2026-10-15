@@ -1,0 +1,50 @@
+# Graafik. Vajab HACS-ist "apexcharts-card".
+# Armatuurlaual: Lisa kaart -> Käsitsi -> kleebi see sisse.
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Elektrihind EE (7 päeva)
+  show_states: false
+graph_span: 8d
+span:
+  start: day
+now:
+  show: true
+  label: praegu
+apex_config:
+  yaxis:
+    decimalsInFloat: 0
+  legend:
+    show: true
+series:
+  - entity: sensor.elektrihind_ee_prognoos
+    name: Kinnitatud
+    type: column
+    color: "#2e7d32"
+    data_generator: |
+      return entity.attributes.hourly.filter(r => r.confirmed)
+        .map(r => [new Date(r.ts_utc.replace('Z', ':00Z')).getTime(), r.actual]);
+  - entity: sensor.elektrihind_ee_prognoos
+    name: Prognoos (p50)
+    type: line
+    color: "#1565c0"
+    stroke_width: 2
+    data_generator: |
+      return entity.attributes.hourly.filter(r => !r.confirmed)
+        .map(r => [new Date(r.ts_utc.replace('Z', ':00Z')).getTime(), r.p50]);
+  - entity: sensor.elektrihind_ee_prognoos
+    name: p90
+    type: line
+    color: "#90caf9"
+    stroke_width: 1
+    data_generator: |
+      return entity.attributes.hourly.filter(r => !r.confirmed)
+        .map(r => [new Date(r.ts_utc.replace('Z', ':00Z')).getTime(), r.p90]);
+  - entity: sensor.elektrihind_ee_prognoos
+    name: p10
+    type: line
+    color: "#90caf9"
+    stroke_width: 1
+    data_generator: |
+      return entity.attributes.hourly.filter(r => !r.confirmed)
+        .map(r => [new Date(r.ts_utc.replace('Z', ':00Z')).getTime(), r.p10]);
