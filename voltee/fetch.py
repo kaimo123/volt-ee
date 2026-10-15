@@ -240,6 +240,11 @@ _UTYPE = {"1": "planeeritud", "planned": "planeeritud", "2": "ootamatu", "unplan
 
 
 def _utc(v) -> pd.Timestamp:
+    """ISO-string või epohh (sekundid/millisekundid, ka numbrilise stringina) -> UTC Timestamp."""
+    if isinstance(v, str) and v.strip().lstrip("-").isdigit():
+        v = int(v)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return pd.Timestamp(v, unit="ms" if abs(v) > 1e11 else "s", tz="UTC")
     t = pd.Timestamp(v)
     return t.tz_convert("UTC") if t.tzinfo else t.tz_localize("UTC")
 

@@ -58,9 +58,22 @@ def main():
     sample = next((m for m in msgs if any(
         g(u, "name") == units.most_common(1)[0][0] for u in (g(m, "productionUnits", []) or []))), None) \
         if units else None
-    if sample:
-        print("\nNäidis-teade (lühendatud):")
-        print("  " + json.dumps(sample, ensure_ascii=False)[:1500])
+    # Ajatemplite kuju ja jaotus aastate kaupa
+    years = collections.Counter()
+    raw_example = None
+    for m in msgs:
+        for u in (g(m, "productionUnits", []) or []) + (g(m, "generationUnits", []) or []):
+            if not fetch._is_ee_unit(u):
+                continue
+            for tp in g(u, "timePeriods", []) or []:
+                raw = g(tp, "eventStart")
+                raw_example = raw_example if raw_example is not None else raw
+                try:
+                    years[fetch._utc(raw).year] += 1
+                except Exception:  # noqa: BLE001
+                    years["viga"] += 1
+    print(f"  eventStart toorväärtus: {raw_example!r} (tüüp {type(raw_example).__name__})")
+    print(f"  tootmisperioodid aastate kaupa: {dict(sorted(years.items(), key=str))}")
     hist = fetch.outage_hours(outs, idx)
     gen = hist["unav_gen"]
     print(f"\nEesti jaamad maas ajaloos ({start.date()}..{now.date()}):")
@@ -90,6 +103,10 @@ def main():
         print(f"  {lbl[o['border']]:5s} {o['name'][:28]:28s} "
               f"{o['start'].tz_convert(config.LOCAL_TZ):%d.%m %H:%M} -> "
               f"{o['stop'].tz_convert(config.LOCAL_TZ):%d.%m %H:%M}  -{o['unavailable_mw']:.0f} MW  {o['type']}")
+
+    if sample:
+        print("\nNäidis-teade (lühendatud):")
+        print("  " + json.dumps(sample, ensure_ascii=False)[:1200])
 
 
 if __name__ == "__main__":
