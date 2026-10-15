@@ -36,7 +36,10 @@ def collect(demo=False):
     df = weather.join(prices, how="left").join(fi_fc, how="left").join(cap, how="left")
 
     now = pd.Timestamp.now(tz="UTC").floor("h")
-    outages = fetch.umm_outages(now - pd.Timedelta(days=1), now + pd.Timedelta(days=config.HORIZON_DAYS + 2))
+    msgs = fetch.umm_messages()
+    outages = fetch.parse_outages(msgs, df.index.min(), df.index.max() + pd.Timedelta(hours=1))
+    # Eesti jaamade (Auvere, Eesti, Balti, Iru jt) katkestuste summa, MW - nii ajalugu kui tulevik
+    df["gen_out_ee"] = fetch.outage_hours(outages, df.index)["unav_gen"]
     df = fill_future_capacity(df, outages, now)
     return df, outages
 
@@ -93,6 +96,7 @@ def forecast(df: pd.DataFrame, outages: list | None = None) -> dict:
             "model": "full" if uf else "base",
             "cap_fi": _r(row.get("cap_fi")),   # EE<->FI saadaolev võimsus, MW
             "cap_lv": _r(row.get("cap_lv")),   # EE<->LV saadaolev võimsus, MW
+            "gen_out_ee": _r(row.get("gen_out_ee")),  # Eesti jaamade katkestused, MW
         })
 
     daily = []
@@ -118,7 +122,8 @@ def forecast(df: pd.DataFrame, outages: list | None = None) -> dict:
             "holdout": metrics,
             "live_mae_by_day_ahead": live_accuracy(),
             "outages": [
-                {"border": "EE-FI" if o["border"] == "fi" else "EE-LV", "name": o["name"],
+                {"border": {"fi": "EE-FI", "lv": "EE-LV", "gen": "EE tootmine"}[o["border"]],
+                 "name": o["name"],
                  "start": o["start"].tz_convert(config.LOCAL_TZ).strftime("%Y-%m-%dT%H:%M"),
                  "stop": o["stop"].tz_convert(config.LOCAL_TZ).strftime("%Y-%m-%dT%H:%M"),
                  "unavailable_mw": o["unavailable_mw"], "type": o["type"]}

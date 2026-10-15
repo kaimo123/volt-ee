@@ -250,42 +250,79 @@ def _inactive(msg: dict) -> bool:
     return any(w in st for w in ("dismiss", "cancel", "inactive"))
 
 
-def umm_outages(start: pd.Timestamp, end: pd.Timestamp) -> list:
-    """Nord Pooli UMM-teadetest EE piiride katkestused ajavahemikus.
-    Tagastab listi: {border, name, start, stop, unavailable_mw, available_mw, type}."""
+def _umm_page(params: dict, max_pages: int) -> list:
     items, skip, limit = [], 0, 200
+    for _ in range(max_pages):
+        js = _get(config.NORDPOOL_UMM_URL, {**params, "limit": limit, "skip": skip})
+        page = _g(js, "items", []) if isinstance(js, dict) else (js or [])
+        items.extend(page)
+        if len(page) < limit:
+            break
+        skip += limit
+    return items
+
+
+def umm_messages() -> list:
+    """Kõik Eesti hinnapiirkonda puudutavad UMM-teated alates TRAIN_START (iga sõnumi uusim
+    versioon). Puhverdatakse kettale; järgmistel kordadel laetakse ainult uued avaldused."""
+    cache = config.CACHE_DIR / "umm.json"
+    store, last = {}, None
+    if cache.exists():
+        try:
+            saved = json.loads(cache.read_text())
+            store, last = saved.get("messages", {}), saved.get("fetched_at")
+        except Exception:  # noqa: BLE001
+            store = {}
+    now = pd.Timestamp.now(tz="UTC")
+    base = {"areas": config.EIC_EE, "includeOutdated": "false"}
     try:
-        for _ in range(15):
-            js = _get(config.NORDPOOL_UMM_URL, {
-                "areas": config.EIC_EE, "includeOutdated": "false",
-                "eventStopDate": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "limit": limit, "skip": skip,
-            })
-            page = _g(js, "items", []) if isinstance(js, dict) else (js or [])
-            items.extend(page)
-            if len(page) < limit:
-                break
-            skip += limit
+        if last:
+            since = (pd.Timestamp(last) - pd.Timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            new = _umm_page({**base, "publicationStartDate": since}, max_pages=20)
+        else:
+            since = pd.Timestamp(config.TRAIN_START, tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
+            log.info("Laen UMM-teadete ajaloo alates %s (esimene kord, võib võtta minuti)", since[:10])
+            new = _umm_page({**base, "eventStopDate": since}, max_pages=100)
     except Exception as e:  # noqa: BLE001
         log.warning("UMM-teateid ei saanud: %s", e)
-        return []
+        return list(store.values())
+    for m in new:
+        mid = str(_g(m, "messageId") or "")
+        if not mid:
+            continue
+        if mid not in store or (_g(m, "version") or 0) >= (_g(store[mid], "version") or 0):
+            store[mid] = m
+    cache.write_text(json.dumps({"fetched_at": now.isoformat(), "messages": store}))
+    n_tr = sum(1 for m in store.values() if _g(m, "transmissionUnits"))
+    n_pr = sum(1 for m in store.values() if _g(m, "productionUnits") or _g(m, "generationUnits"))
+    log.info("UMM: %d uut, kokku %d sõnumit (%d ülekande-, %d tootmisteadet)", len(new), len(store), n_tr, n_pr)
+    if store and not (n_tr or n_pr):
+        log.info("UMM näidis-sõnumi väljad: %s", sorted(next(iter(store.values())).keys()))
+    return list(store.values())
 
-    # Iga sõnumi viimane versioon
-    latest = {}
-    for m in items:
-        mid = _g(m, "messageId") or id(m)
-        if mid not in latest or (_g(m, "version") or 0) >= (_g(latest[mid], "version") or 0):
-            latest[mid] = m
 
+def _is_ee_unit(unit: dict) -> bool:
+    s = json.dumps(unit, ensure_ascii=False)
+    return config.EIC_EE in s or "estonia" in s.lower() or '"ee"' in s.lower()
+
+
+def parse_outages(messages: list, start: pd.Timestamp, end: pd.Timestamp) -> list:
+    """UMM-teadetest katkestused ajavahemikus [start, end).
+    kind='transmission' (border 'fi'/'lv') või kind='production' (Eesti jaamad, border 'gen')."""
     out = []
-    for m in latest.values():
+    for m in messages:
         if _inactive(m):
             continue
-        utype = str(_g(m, "unavailabilityType", ""))
-        for unit in _g(m, "transmissionUnits", []) or []:
-            border = _border_of(unit)
-            if not border:
-                continue
+        utype = _UTYPE.get(str(_g(m, "unavailabilityType", "")).lower(), str(_g(m, "unavailabilityType", "")))
+        units = []
+        for u in _g(m, "transmissionUnits", []) or []:
+            b = _border_of(u)
+            if b:
+                units.append(("transmission", b, u))
+        for u in (_g(m, "productionUnits", []) or []) + (_g(m, "generationUnits", []) or []):
+            if _is_ee_unit(u):
+                units.append(("production", "gen", u))
+        for kind, border, unit in units:
             installed = _g(unit, "installedCapacity")
             for tp in _g(unit, "timePeriods", []) or []:
                 try:
@@ -298,23 +335,17 @@ def umm_outages(start: pd.Timestamp, end: pd.Timestamp) -> list:
                 avail = _g(tp, "availableCapacity")
                 if unav is None and installed is not None and avail is not None:
                     unav = installed - avail
-                if unav is None:
+                if not unav:
                     continue
-                out.append({"border": border, "name": _g(unit, "name", ""), "start": t0, "stop": t1,
-                            "unavailable_mw": float(unav), "available_mw": avail,
-                            "type": _UTYPE.get(utype.lower(), utype)})
-    n_tr = sum(1 for m in latest.values() if _g(m, "transmissionUnits"))
-    log.info("UMM: %d sõnumit (%d ülekandeteadet), %d EE piiri katkestust prognoosiperioodis",
-             len(latest), n_tr, len(out))
-    if latest and not n_tr:
-        # Diagnostika: kui väljanimed erinevad oodatust, näeb logist, mis kujul andmed tulid
-        log.info("UMM näidis-sõnumi väljad: %s", sorted(next(iter(latest.values())).keys()))
+                out.append({"kind": kind, "border": border, "name": _g(unit, "name", ""),
+                            "start": t0, "stop": t1, "unavailable_mw": float(unav),
+                            "available_mw": avail, "type": utype})
     return out
 
 
 def outage_hours(outages: list, index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Katkestuste summa (MW) tunni kaupa piiri järgi."""
-    df = pd.DataFrame(0.0, index=index, columns=["unav_fi", "unav_lv"])
+    """Katkestuste summa (MW) tunni kaupa: unav_fi, unav_lv (ühendused), unav_gen (Eesti jaamad)."""
+    df = pd.DataFrame(0.0, index=index, columns=["unav_fi", "unav_lv", "unav_gen"])
     for o in outages:
         mask = (index >= o["start"].floor("h")) & (index < o["stop"])
         df.loc[mask, f"unav_{o['border']}"] += o["unavailable_mw"]

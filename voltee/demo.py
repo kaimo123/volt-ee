@@ -43,8 +43,14 @@ def synthetic(seed=1) -> pd.DataFrame:
     # Estlinki katkestuse ajal haakub EE Soomest lahti ja liigub Läti hinna + lisa järgi
     w = 1 - cap_fi / 1016
     ee = (1 - w) * ee + w * (lv + 60 * daily)
+    # Eesti jaamade katkestused (nt Auvere 270 MW): kui jaam on maas, tõuseb hind tipptundidel
+    gen_out = np.zeros(n)
+    for _ in range(15):
+        s = rng.integers(0, max(n - 24 * 10, 1))
+        gen_out[s:s + rng.integers(24, 24 * 10)] += 270
+    ee = ee + gen_out / 270 * 35 * daily
     df["price_fi"], df["price_ee"], df["price_lv"] = fi, ee, lv
-    df["cap_fi"], df["cap_lv"] = cap_fi, cap_lv
+    df["cap_fi"], df["cap_lv"], df["gen_out_ee"] = cap_fi, cap_lv, gen_out
 
     published = local.normalize() <= (pd.Timestamp.now(tz=config.LOCAL_TZ).normalize() + pd.Timedelta(days=1))
     for c in ("price_fi", "price_ee", "price_lv"):
@@ -55,7 +61,14 @@ def synthetic(seed=1) -> pd.DataFrame:
     df["fi_forecast"] = np.where(fc_mask, fi + rng.normal(0, 15, n), np.nan)
     # Üks tulevane plaaniline katkestus (UMM): Estlink 2 maas 3.-4. päeval
     t0 = (now + pd.Timedelta(days=3)).normalize()
-    outages = [{"border": "fi", "name": "Estlink 2 (demo)", "start": t0,
+    outages = [{"kind": "transmission", "border": "fi", "name": "Estlink 2 (demo)", "start": t0,
                 "stop": t0 + pd.Timedelta(days=2), "unavailable_mw": 650.0,
-                "available_mw": 0, "type": "planeeritud"}]
+                "available_mw": 0, "type": "planeeritud"},
+               {"kind": "production", "border": "gen", "name": "Auvere (demo)",
+                "start": t0 - pd.Timedelta(days=2), "stop": t0 + pd.Timedelta(days=1),
+                "unavailable_mw": 270.0, "available_mw": 0, "type": "planeeritud"}]
+    # Tulevikus on Eesti jaamade katkestused teada ainult UMM-teadetest
+    from .fetch import outage_hours
+    future = ~published
+    df.loc[future, "gen_out_ee"] = outage_hours(outages, df.index[future])["unav_gen"].to_numpy()
     return df, outages

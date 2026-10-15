@@ -26,6 +26,9 @@ Sähkövatkain ──── Soome hinnaprognoos ──────────�
   mediaan) ja lahutatakse Nord Pooli UMM-teadetest (`ummapi.nordpoolgroup.com`, ilma võtmeta)
   teada olevad plaanilised ja ootamatud katkestused. Katkestuste nimekiri on JSON-is
   `meta.outages` all ja HA-s andur `sensor.elektri_uhenduste_katkestused`.
+* **Eesti jaamad:** Auvere, Eesti, Balti, Iru jt jaamade katkestused (MW kokku) tulevad samuti
+  Nord Pooli UMM-teadetest ja on tunnus `gen_out_ee` - nii treeningajaloos kui prognoosis.
+  Teated puhverdatakse faili `data/cache/umm.json`.
   NB: suuri katkestusi on ajaloos vähe, seega võib mudel nende mõju alahinnata.
 * **Kinnitatud hinnad:** kui Nord Pool on homse hinna avaldanud (~14:00), näidatakse
   päris hinda (`confirmed: true`) ja prognoos algab ülehomsest.

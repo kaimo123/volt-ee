@@ -14,8 +14,9 @@ QUANTILES = np.array([0.1, 0.5, 0.9])
 WEATHER_FEATURES = ["wind_ee", "wind_lv", "wind_fi", "temp_ee", "temp_fi", "solar"]
 CALENDAR_FEATURES = ["hour", "dow", "month", "doy_sin", "doy_cos", "holiday"]
 REQUIRED_FEATURES = CALENDAR_FEATURES + WEATHER_FEATURES + ["wind_ee_6h", "wind_fi_6h"]
-# Ülekandevõimsus EE<->FI (Estlink 1+2) ja EE<->LV, MW. Võivad puududa (NaN), see on lubatud.
-CAP_FEATURES = ["cap_fi", "cap_lv"]
+# Ülekandevõimsus EE<->FI (Estlink 1+2) ja EE<->LV, MW, ning Eesti jaamade (Auvere, Eesti,
+# Balti, Iru jt) UMM-teadetest teada olevad katkestused kokku, MW. Võivad puududa (NaN).
+CAP_FEATURES = ["cap_fi", "cap_lv", "gen_out_ee"]
 BASE_FEATURES = REQUIRED_FEATURES + CAP_FEATURES
 FULL_FEATURES = BASE_FEATURES + ["fi_price"]   # + Soome hind (tegelik või Sähkövatkaini prognoos)
 
