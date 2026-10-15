@@ -1,26 +1,45 @@
 {#
-  volt-ee -> EMHASS hinnaprognoos.
+  volt-ee -> EMHASS hinnaprognoos koos Elektrilevi tariifi ja kõigi tasudega.
   Pane see fail Home Assistantis kausta /config/custom_templates/volt_ee.jinja
-  ja vali Arendaja tööriistad -> YAML -> "Laadi uuesti mallid" (või taaskäivita HA).
+  ja vali Arendaja tööriistad -> YAML -> "Laadi uuesti mallid".
+
+  Tasud loetakse samadest input_number olemitest, mida kasutab sensor.nordpool_import:
+    input_number.elektri_edastamine_paev / _oo / _paev_tipuaeg / _oo_puhkepaeva_tipuaeg
+    input_number.taastuvenergia_tasu, aktsiis, minu_ostu_marginaal,
+    tasakaalustamisvoimsuse_kulu, varustuskindluse_tasu, kaibemaks (%)
+    input_number.minu_muugi_marginaal (valikuline, müügi jaoks; puudumisel 0)
+
+  Ühik: tasud peavad olema samas ühikus nagu sensor.nordpool_sell hinnad.
+  Kui selle anduri atribuut price_in_cents on true, on kõik c/kWh, muidu €/kWh.
+  EMHASS-ile väljastatakse alati €/kWh.
 
   Kasutamine EMHASS-i kutses:
     {% from 'volt_ee.jinja' import volt_import, volt_export %}
     "load_cost_forecast": {{ volt_import(48) }},
     "prod_price_forecast": {{ volt_export(48) }}
 
-  Tulemus on JSON-objekt kujul {"2026-10-16T09:00:00+00:00": 0.1234, ...} (€/kWh).
-  EMHASS loeb iga väärtuse kehtivaks kuni järgmise ajatemplini, seega sobib
-  nii 30- kui ka 60-minutilise optimization_time_step-iga.
+  Tulemus: {"2026-10-16T09:00:00+00:00": 0.1234, ...} (€/kWh). EMHASS loeb iga väärtuse
+  kehtivaks kuni järgmise ajatemplini (sobib 15-, 30- ja 60-minutilise sammuga).
 
-  >>> MUUDA ALLOLEVAD TASUD OMA LEPINGU JÄRGI (€/kWh, ilma käibemaksuta) <<<
+  volt_import_raw(168) annab sama sisu sensor.nordpool_import'i raw_all kujul
+  ([{"start", "end", "value"}], anduri enda ühikus) - nt graafikute jaoks.
 #}
-{% macro _volt(kind, hours) %}
-{%- set marginaal       = 0.0050 -%}  {# elektrimüüja marginaal ostul #}
-{%- set vork_paev       = 0.0600 -%}  {# võrgutasu päevasel ajal #}
-{%- set vork_oo         = 0.0350 -%}  {# võrgutasu öösel ja nädalavahetusel #}
-{%- set muud_tasud      = 0.0150 -%}  {# taastuvenergia tasu, aktsiis, varustuskindlus jms #}
-{%- set km              = 1.24   -%}  {# käibemaks #}
-{%- set muugi_marginaal = 0.0030 -%}  {# päikesejaama müügil maha arvatav marginaal #}
+{% macro _num(e) %}{{ states('input_number.' ~ e) | float(0) }}{% endmacro %}
+
+{% macro _volt(kind, hours, fmt) %}
+{%- set np_sensor = 'sensor.nordpool_sell' -%}
+{%- set cents = state_attr(np_sensor, 'price_in_cents') in [true, 'true', 'True'] -%}
+{%- set paev       = _num('elektri_edastamine_paev') | float -%}
+{%- set oo         = _num('elektri_edastamine_oo') | float -%}
+{%- set paev_tipp  = _num('elektri_edastamine_paev_tipuaeg') | float -%}
+{%- set puhke_tipp = _num('elektri_edastamine_oo_puhkepaeva_tipuaeg') | float -%}
+{%- set muud = (_num('taastuvenergia_tasu') | float) + (_num('aktsiis') | float)
+             + (_num('tasakaalustamisvoimsuse_kulu') | float) + (_num('varustuskindluse_tasu') | float) -%}
+{%- set ostu_marg  = _num('minu_ostu_marginaal') | float -%}
+{%- set muugi_marg = _num('minu_muugi_marginaal') | float -%}
+{%- set km = 1 + (_num('kaibemaks') | float) / 100 -%}
+{%- set cal = state_attr('calendar.estonia', 'start_time') -%}
+{%- set puha = as_datetime(cal).date() if cal else none -%}
 {%- set rows = state_attr('sensor.elektrihind_ee_prognoos', 'hourly') or [] -%}
 {%- set alates = now() - timedelta(hours=1) -%}
 {%- set ns = namespace(out=[], n=0) -%}
@@ -28,24 +47,47 @@
   {%- if r.price is number -%}
     {%- set ts = as_datetime(r.ts_utc | replace('Z', ':00+00:00')) -%}
     {%- if ts > alates and ns.n < hours -%}
-      {%- set spot = r.price / 1000 -%}
       {%- set lt = as_local(ts) -%}
-      {%- set oo = lt.hour < 7 or lt.hour >= 22 or lt.weekday() >= 5 -%}
-      {%- if kind == 'import' -%}
-        {%- set v = (spot + marginaal + (vork_oo if oo else vork_paev) + muud_tasud) * km -%}
+      {%- set h = lt.hour -%}
+      {%- set suvi = lt.utcoffset().total_seconds() > 7200 -%}
+      {%- set too = lt.weekday() < 5 and lt.date() != puha -%}
+      {%- set paeval = (8 <= h < 24) if suvi else (7 <= h < 23) -%}
+      {%- set talv = lt.month in [11, 12, 1, 2, 3] -%}
+      {%- if talv and too and paeval and (9 <= h < 12 or 16 <= h < 20) -%}
+        {%- set vork = paev_tipp -%}
+      {%- elif talv and not too and 16 <= h < 20 -%}
+        {%- set vork = puhke_tipp -%}
+      {%- elif too and paeval -%}
+        {%- set vork = paev -%}
       {%- else -%}
-        {%- set v = spot - muugi_marginaal -%}
+        {%- set vork = oo -%}
       {%- endif -%}
-      {%- set ns.out = ns.out + ['"' ~ ts.isoformat() ~ '": ' ~ (v | round(5))] -%}
+      {#- börsihind €/MWh -> anduri ühik (c/kWh või €/kWh) -#}
+      {%- set spot = r.price / 10 if cents else r.price / 1000 -%}
+      {%- if kind == 'import' -%}
+        {%- set v = (spot + ostu_marg + vork + muud) * km -%}
+      {%- else -%}
+        {%- set v = spot - muugi_marg -%}
+      {%- endif -%}
+      {%- if fmt == 'raw' -%}
+        {%- set ns.out = ns.out + [{"start": lt.isoformat(), "end": (lt + timedelta(hours=1)).isoformat(),
+                                    "value": v | round(5)}] -%}
+      {%- else -%}
+        {%- set eur = v / 100 if cents else v -%}
+        {%- set ns.out = ns.out + ['"' ~ ts.isoformat() ~ '": ' ~ (eur | round(5))] -%}
+      {%- endif -%}
       {%- set ns.n = ns.n + 1 -%}
     {%- endif -%}
   {%- endif -%}
 {%- endfor -%}
-{{ '{' ~ (ns.out | join(', ')) ~ '}' }}
+{%- if fmt == 'raw' -%}{{ ns.out | tojson }}{%- else -%}{{ '{' ~ (ns.out | join(', ')) ~ '}' }}{%- endif -%}
 {%- endmacro %}
 
-{# Ostuhind (€/kWh, koos tasude ja km-ga) järgmiseks N tunniks #}
-{% macro volt_import(hours=48) %}{{ _volt('import', hours) }}{% endmacro %}
+{# Ostuhind (€/kWh, koos võrgutasu, kõigi tasude ja km-ga) järgmiseks N tunniks #}
+{% macro volt_import(hours=48) %}{{ _volt('import', hours, 'emhass') }}{% endmacro %}
 
 {# Müügihind (€/kWh) järgmiseks N tunniks #}
-{% macro volt_export(hours=48) %}{{ _volt('export', hours) }}{% endmacro %}
+{% macro volt_export(hours=48) %}{{ _volt('export', hours, 'emhass') }}{% endmacro %}
+
+{# Ostuhind sensor.nordpool_import raw_all kujul (anduri ühikus) #}
+{% macro volt_import_raw(hours=168) %}{{ _volt('import', hours, 'raw') }}{% endmacro %}

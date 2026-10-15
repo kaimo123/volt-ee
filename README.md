@@ -84,10 +84,12 @@ Hinnad on **börsihinnad ilma käibemaksu ja võrgutasudeta** (€/MWh; c/kWh = 
 ### EMHASS
 
 `homeassistant/volt_ee.jinja` teisendab prognoosi EMHASS-i vormingusse
-(€/kWh, ajatempel → hind, lisab marginaali, võrgutasu päev/öö, muud tasud ja km).
+(€/kWh, ajatempel → hind). Elektrilevi tariif (päev/öö, talvised tipuajad, puhkepäeva tipp,
+suve-/talveaeg, riigipühad `calendar.estonia` kaudu) ja tasud loetakse `input_number` olemitest
+(vt faili päist). Ühik (c/kWh või €/kWh) võetakse `sensor.nordpool_sell` atribuudist `price_in_cents`.
 
 1. Kopeeri fail HA-s kausta `/config/custom_templates/volt_ee.jinja`.
-2. **Muuda faili alguses olevad tasud oma lepingu järgi.**
+2. Kontrolli, et faili päises nimetatud `input_number` olemid on olemas.
 3. Arendaja tööriistad → YAML → **Laadi uuesti mallid**.
 4. Kasuta EMHASS-i kutses, nt:
 
