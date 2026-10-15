@@ -13,7 +13,6 @@ rest:
       - name: "Elektrihind EE prognoos"
         unique_id: volt_ee_price
         unit_of_measurement: "€/MWh"
-        device_class: monetary
         # Praeguse tunni hind: kinnitatud börsihind või prognoosi mediaan
         value_template: >
           {% set h = now().strftime('%Y-%m-%dT%H:00') %}
