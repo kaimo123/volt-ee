@@ -1,0 +1,58 @@
+# Lõpphinna graafik (börs + marginaal + võrgutasu + tasud + km), 8 päeva.
+# Vajab: HACS -> apexcharts-card, andurit sensor.elektrihind_ee_lopphind (volt_ee.yaml)
+# ja faili /config/custom_templates/volt_ee.jinja.
+# Rohelised tulbad = kinnitatud börsihinnal, sinised = prognoos.
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Elektri lõpphind
+  show_states: true
+  colorize_states: true
+graph_span: 8d
+span:
+  start: hour
+now:
+  show: true
+  label: praegu
+yaxis:
+  - decimals: 1
+apex_config:
+  legend:
+    show: true
+  tooltip:
+    x:
+      format: "ddd dd.MM HH:mm"
+  plotOptions:
+    bar:
+      columnWidth: 90%
+series:
+  - entity: sensor.elektrihind_ee_lopphind
+    name: Kinnitatud
+    type: column
+    color: "#2e7d32"
+    show:
+      in_header: false
+    data_generator: |
+      const p = hass.states['sensor.elektrihind_ee_prognoos'];
+      const ok = new Set(((p && p.attributes.hourly) || []).filter(r => r.confirmed)
+        .map(r => new Date(r.ts_utc.replace('Z', ':00Z')).getTime()));
+      return (entity.attributes.raw_all || [])
+        .map(r => [new Date(r.start).getTime(), r.value])
+        .filter(x => ok.has(x[0]));
+  - entity: sensor.elektrihind_ee_lopphind
+    name: Prognoos
+    type: column
+    color: "#64b5f6"
+    show:
+      in_header: false
+    data_generator: |
+      const p = hass.states['sensor.elektrihind_ee_prognoos'];
+      const ok = new Set(((p && p.attributes.hourly) || []).filter(r => r.confirmed)
+        .map(r => new Date(r.ts_utc.replace('Z', ':00Z')).getTime()));
+      return (entity.attributes.raw_all || [])
+        .map(r => [new Date(r.start).getTime(), r.value])
+        .filter(x => !ok.has(x[0]));
+  - entity: sensor.elektrihind_ee_lopphind
+    name: Praegu
+    show:
+      in_chart: false

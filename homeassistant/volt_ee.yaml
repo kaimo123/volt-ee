@@ -62,6 +62,20 @@ template:
             {{ o.name }} ({{ o.border }}, -{{ o.unavailable_mw | int }} MW, {{ o.type }}): {{ o.start | replace('T',' ') }} – {{ o.stop | replace('T',' ') }}
             {% endfor %}
 
+      # Lõpphind (börs + marginaal + võrgutasu + tasud + km) 8 päeva ette.
+      # Vajab faili /config/custom_templates/volt_ee.jinja. Ühik = sensor.nordpool_sell ühik.
+      - name: "Elektrihind EE lõpphind"
+        unique_id: volt_ee_final_price
+        icon: mdi:cash-clock
+        state: >
+          {% from 'volt_ee.jinja' import volt_import_raw %}
+          {% set r = volt_import_raw(192) | from_json %}
+          {{ r[0].value if r else none }}
+        attributes:
+          raw_all: >
+            {% from 'volt_ee.jinja' import volt_import_raw %}
+            {{ volt_import_raw(192) | from_json }}
+
   - binary_sensor:
       # Näide automaatika jaoks: kas praegune tund on päeva 6 odavama hulgas
       - name: "Elektrihind EE odav tund"
@@ -78,3 +92,4 @@ recorder:
   exclude:
     entities:
       - sensor.elektrihind_ee_prognoos
+      - sensor.elektrihind_ee_lopphind
