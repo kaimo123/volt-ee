@@ -253,7 +253,8 @@ def _inactive(msg: dict) -> bool:
     if _g(msg, "isOutdated"):
         return True
     st = str(_g(msg, "eventStatus", "")).lower()
-    return any(w in st for w in ("dismiss", "cancel", "inactive"))
+    # Nord Pool UMM: 1 = aktiivne, 3 = tühistatud (dismissed)
+    return st == "3" or any(w in st for w in ("dismiss", "cancel"))
 
 
 def _umm_page(params: dict, max_pages: int) -> list:

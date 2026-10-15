@@ -68,7 +68,7 @@ def fill_future_capacity(df: pd.DataFrame, outages: list, now: pd.Timestamp) -> 
 
 def forecast(df: pd.DataFrame, outages: list | None = None) -> dict:
     frame = model.build_features(df)
-    full, base, metrics, n_train = model.train(frame)
+    full, base, metrics, n_train, full_f, base_f = model.train(frame)
 
     local_now = pd.Timestamp.now(tz=config.LOCAL_TZ)
     start = local_now.normalize().tz_convert("UTC")
@@ -78,9 +78,9 @@ def forecast(df: pd.DataFrame, outages: list | None = None) -> dict:
     use_full = fut["fi_price"].notna()
     pred = np.full((len(fut), 3), np.nan)
     if use_full.any():
-        pred[use_full.to_numpy()] = model.predict(full, fut.loc[use_full, model.FULL_FEATURES])
+        pred[use_full.to_numpy()] = model.predict(full, fut.loc[use_full, full_f])
     if (~use_full).any():
-        pred[~use_full.to_numpy()] = model.predict(base, fut.loc[~use_full, model.BASE_FEATURES])
+        pred[~use_full.to_numpy()] = model.predict(base, fut.loc[~use_full, base_f])
 
     hourly = []
     for (ts, row), p, uf in zip(fut.iterrows(), pred, use_full):

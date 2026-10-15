@@ -86,12 +86,32 @@ def evaluate(frame: pd.DataFrame, features, holdout_days=30) -> dict:
     }
 
 
+def usable_optional(data: pd.DataFrame, min_share=0.01) -> list:
+    """Valikulised tunnused, millel on treeningandmetes sisu: vähemalt 1% ridadest
+    on väärtus olemas JA see erineb tavapärasest (mediaanist). Muidu on tunnus müra."""
+    keep = []
+    for c in CAP_FEATURES:
+        s = data[c].dropna() if c in data else pd.Series(dtype=float)
+        if len(s) < min_share * len(data):
+            continue
+        if (s != s.median()).mean() < min_share:
+            continue
+        keep.append(c)
+    return keep
+
+
 def train(frame: pd.DataFrame):
-    """Tagastab (täismudel, baasmudel, hindamistulemused)."""
+    """Tagastab (täismudel, baasmudel, hindamistulemused, ridu, täis-tunnused, baas-tunnused)."""
     data = frame.dropna(subset=["price_ee"] + REQUIRED_FEATURES)
     full_data = data.dropna(subset=["fi_price"])
-    log.info("Treeningridu: %d (FI hinnaga %d)", len(data), len(full_data))
-    metrics = {"base": evaluate(data, BASE_FEATURES), "full": evaluate(full_data, FULL_FEATURES)}
-    base = _fit(data[BASE_FEATURES], data["price_ee"], _weights(data.index))
-    full = _fit(full_data[FULL_FEATURES], full_data["price_ee"], _weights(full_data.index))
-    return full, base, metrics, len(data)
+    opt = usable_optional(data)
+    dropped = [c for c in CAP_FEATURES if c not in opt]
+    base_f = REQUIRED_FEATURES + opt
+    full_f = base_f + ["fi_price"]
+    log.info("Treeningridu: %d (FI hinnaga %d); valikulised tunnused: %s%s", len(data), len(full_data),
+             opt or "-", f" (sisu puudub, välja jäetud: {dropped})" if dropped else "")
+    metrics = {"base": evaluate(data, base_f), "full": evaluate(full_data, full_f),
+               "features": full_f}
+    base = _fit(data[base_f], data["price_ee"], _weights(data.index))
+    full = _fit(full_data[full_f], full_data["price_ee"], _weights(full_data.index))
+    return full, base, metrics, len(data), full_f, base_f
