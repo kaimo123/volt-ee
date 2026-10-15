@@ -2,6 +2,7 @@
 
 Kõik funktsioonid tagastavad pandas DataFrame'i, mille indeks on tunnipõhine UTC aeg.
 """
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -143,3 +144,178 @@ def fi_forecast() -> pd.Series:
     s = pd.Series({pd.Timestamp(int(ts), unit="ms", tz="UTC"): v * 10 / config.FI_VAT for ts, v in js},
                   name="fi_forecast")
     return s.sort_index()
+
+
+# --------------------------------------------------------------------------- ülekandevõimsus
+def _cap_value(rec: dict):
+    """Ühe rea võimsus (MW). Eelistame NTC-d (füüsiline piir), muidu ATC-d; suurem suund."""
+    ntc = [v for k, v in rec.items() if "ntc" in k.lower() and isinstance(v, (int, float))]
+    atc = [v for k, v in rec.items() if "atc" in k.lower() and isinstance(v, (int, float))]
+    vals = ntc or atc
+    return max(vals) if vals else None
+
+
+def _fetch_capacity_range(start: datetime, end: datetime) -> pd.DataFrame:
+    rows = []
+    cur = start
+    while cur < end:
+        nxt = min(cur + timedelta(days=30), end)
+        js = _get(config.ELERING_CAPACITY_URL, {
+            "start": cur.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "end": nxt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        })
+        data = js.get("data", {}) if isinstance(js, dict) else {}
+        for zone in ("FI", "LV"):
+            for rec in data.get(zone, data.get(zone.lower(), [])) or []:
+                v = _cap_value(rec)
+                if v is not None and "timestamp" in rec:
+                    rows.append((rec["timestamp"], zone.lower(), v))
+        cur = nxt
+    if not rows:
+        return pd.DataFrame(columns=["cap_fi", "cap_lv"])
+    df = pd.DataFrame(rows, columns=["ts", "zone", "cap"])
+    df["ts"] = pd.to_datetime(df["ts"], unit="s", utc=True)
+    df = df.pivot_table(index="ts", columns="zone", values="cap").resample("1h").mean()
+    df.columns = [f"cap_{c}" for c in df.columns]
+    return df
+
+
+def capacity() -> pd.DataFrame:
+    """EE<->FI ja EE<->LV ülekandevõimsus (MW) Eleringist. Puhverdatakse kettale.
+    Tühi DataFrame, kui andmeid ei saa (mudel töötab siis ilma nende tunnusteta)."""
+    cache = config.CACHE_DIR / "capacity.csv"
+    now = datetime.now(timezone.utc)
+    end = (now + timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        if cache.exists():
+            old = pd.read_csv(cache, index_col=0, parse_dates=True)
+            old.index = pd.to_datetime(old.index, utc=True)
+            start = (old.dropna(how="all").index.max() - pd.Timedelta(days=3)).to_pydatetime()
+        else:
+            old = None
+            start = pd.Timestamp(config.TRAIN_START, tz="UTC").to_pydatetime()
+        log.info("Laen ülekandevõimsused %s .. %s", start.date(), end.date())
+        new = _fetch_capacity_range(start, end)
+        if old is not None and len(new):
+            df = pd.concat([old[old.index < new.index.min()], new])
+        else:
+            df = new if old is None else old
+        df = df[~df.index.duplicated(keep="last")].sort_index()
+        df.to_csv(cache)
+        return df
+    except Exception as e:  # noqa: BLE001
+        log.warning("Ülekandevõimsusi ei saanud: %s", e)
+        return pd.DataFrame(columns=["cap_fi", "cap_lv"])
+
+
+# --------------------------------------------------------------------------- UMM katkestused
+def _g(d: dict, name, default=None):
+    """Tõstutundetu võtme lugemine (API kasutab camelCase'i, mõni klient PascalCase'i)."""
+    if not isinstance(d, dict):
+        return default
+    if name in d:
+        return d[name]
+    low = name.lower()
+    for k, v in d.items():
+        if k.lower() == low:
+            return v
+    return default
+
+
+def _border_of(unit: dict):
+    """Mis piiriga on tegu: 'fi', 'lv' või None. Otsib EIC-koode ja nimesid kogu objektist."""
+    s = json.dumps(unit, ensure_ascii=False)
+    sl = s.lower()
+    if config.EIC_EE not in s and "estonia" not in sl and '"ee"' not in sl and "estlink" not in sl:
+        return None
+    if "estlink" in sl or config.EIC_FI in s or "finland" in sl or '"fi"' in sl:
+        return "fi"
+    if config.EIC_LV in s or "latvia" in sl or '"lv"' in sl:
+        return "lv"
+    return None
+
+
+_UTYPE = {"1": "planeeritud", "planned": "planeeritud", "2": "ootamatu", "unplanned": "ootamatu"}
+
+
+def _utc(v) -> pd.Timestamp:
+    t = pd.Timestamp(v)
+    return t.tz_convert("UTC") if t.tzinfo else t.tz_localize("UTC")
+
+
+def _inactive(msg: dict) -> bool:
+    if _g(msg, "isOutdated"):
+        return True
+    st = str(_g(msg, "eventStatus", "")).lower()
+    return any(w in st for w in ("dismiss", "cancel", "inactive"))
+
+
+def umm_outages(start: pd.Timestamp, end: pd.Timestamp) -> list:
+    """Nord Pooli UMM-teadetest EE piiride katkestused ajavahemikus.
+    Tagastab listi: {border, name, start, stop, unavailable_mw, available_mw, type}."""
+    items, skip, limit = [], 0, 200
+    try:
+        for _ in range(15):
+            js = _get(config.NORDPOOL_UMM_URL, {
+                "areas": config.EIC_EE, "includeOutdated": "false",
+                "eventStopDate": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "limit": limit, "skip": skip,
+            })
+            page = _g(js, "items", []) if isinstance(js, dict) else (js or [])
+            items.extend(page)
+            if len(page) < limit:
+                break
+            skip += limit
+    except Exception as e:  # noqa: BLE001
+        log.warning("UMM-teateid ei saanud: %s", e)
+        return []
+
+    # Iga sõnumi viimane versioon
+    latest = {}
+    for m in items:
+        mid = _g(m, "messageId") or id(m)
+        if mid not in latest or (_g(m, "version") or 0) >= (_g(latest[mid], "version") or 0):
+            latest[mid] = m
+
+    out = []
+    for m in latest.values():
+        if _inactive(m):
+            continue
+        utype = str(_g(m, "unavailabilityType", ""))
+        for unit in _g(m, "transmissionUnits", []) or []:
+            border = _border_of(unit)
+            if not border:
+                continue
+            installed = _g(unit, "installedCapacity")
+            for tp in _g(unit, "timePeriods", []) or []:
+                try:
+                    t0, t1 = _utc(_g(tp, "eventStart")), _utc(_g(tp, "eventStop"))
+                except Exception:  # noqa: BLE001
+                    continue
+                if t1 <= start or t0 >= end:
+                    continue
+                unav = _g(tp, "unavailableCapacity")
+                avail = _g(tp, "availableCapacity")
+                if unav is None and installed is not None and avail is not None:
+                    unav = installed - avail
+                if unav is None:
+                    continue
+                out.append({"border": border, "name": _g(unit, "name", ""), "start": t0, "stop": t1,
+                            "unavailable_mw": float(unav), "available_mw": avail,
+                            "type": _UTYPE.get(utype.lower(), utype)})
+    n_tr = sum(1 for m in latest.values() if _g(m, "transmissionUnits"))
+    log.info("UMM: %d sõnumit (%d ülekandeteadet), %d EE piiri katkestust prognoosiperioodis",
+             len(latest), n_tr, len(out))
+    if latest and not n_tr:
+        # Diagnostika: kui väljanimed erinevad oodatust, näeb logist, mis kujul andmed tulid
+        log.info("UMM näidis-sõnumi väljad: %s", sorted(next(iter(latest.values())).keys()))
+    return out
+
+
+def outage_hours(outages: list, index: pd.DatetimeIndex) -> pd.DataFrame:
+    """Katkestuste summa (MW) tunni kaupa piiri järgi."""
+    df = pd.DataFrame(0.0, index=index, columns=["unav_fi", "unav_lv"])
+    for o in outages:
+        mask = (index >= o["start"].floor("h")) & (index < o["stop"])
+        df.loc[mask, f"unav_{o['border']}"] += o["unavailable_mw"]
+    return df

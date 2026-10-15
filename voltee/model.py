@@ -13,7 +13,10 @@ log = logging.getLogger(__name__)
 QUANTILES = np.array([0.1, 0.5, 0.9])
 WEATHER_FEATURES = ["wind_ee", "wind_lv", "wind_fi", "temp_ee", "temp_fi", "solar"]
 CALENDAR_FEATURES = ["hour", "dow", "month", "doy_sin", "doy_cos", "holiday"]
-BASE_FEATURES = CALENDAR_FEATURES + WEATHER_FEATURES + ["wind_ee_6h", "wind_fi_6h"]
+REQUIRED_FEATURES = CALENDAR_FEATURES + WEATHER_FEATURES + ["wind_ee_6h", "wind_fi_6h"]
+# Ülekandevõimsus EE<->FI (Estlink 1+2) ja EE<->LV, MW. Võivad puududa (NaN), see on lubatud.
+CAP_FEATURES = ["cap_fi", "cap_lv"]
+BASE_FEATURES = REQUIRED_FEATURES + CAP_FEATURES
 FULL_FEATURES = BASE_FEATURES + ["fi_price"]   # + Soome hind (tegelik või Sähkövatkaini prognoos)
 
 PARAMS = dict(
@@ -38,6 +41,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     out["holiday"] = [int(d in ee_hol) for d in local.date]
     out["wind_ee_6h"] = out["wind_ee"].rolling(6, min_periods=1, center=True).mean()
     out["wind_fi_6h"] = out["wind_fi"].rolling(6, min_periods=1, center=True).mean()
+    for c in CAP_FEATURES:
+        if c not in out:
+            out[c] = np.nan
     # Soome hind: kus tegelik on teada, kasuta seda; muidu Sähkövatkaini prognoosi
     fc = out["fi_forecast"] if "fi_forecast" in out else np.nan
     out["fi_price"] = out["price_fi"].fillna(fc) if "price_fi" in out else fc
@@ -81,7 +87,7 @@ def evaluate(frame: pd.DataFrame, features, holdout_days=30) -> dict:
 
 def train(frame: pd.DataFrame):
     """Tagastab (täismudel, baasmudel, hindamistulemused)."""
-    data = frame.dropna(subset=["price_ee"] + BASE_FEATURES)
+    data = frame.dropna(subset=["price_ee"] + REQUIRED_FEATURES)
     full_data = data.dropna(subset=["fi_price"])
     log.info("Treeningridu: %d (FI hinnaga %d)", len(data), len(full_data))
     metrics = {"base": evaluate(data, BASE_FEATURES), "full": evaluate(full_data, FULL_FEATURES)}

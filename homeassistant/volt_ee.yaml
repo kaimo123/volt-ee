@@ -49,6 +49,20 @@ template:
           {% set x = r | sort(attribute='mean') | first | default(none) %}
           {{ x.date if x else none }}
 
+      # Eelseisvad ülekandeühenduste katkestused (Estlink, EE-LV) Nord Pooli UMM-teadetest
+      - name: "Elektri ühenduste katkestused"
+        unique_id: volt_ee_outages
+        icon: mdi:transmission-tower-off
+        state: >
+          {% set m = state_attr('sensor.elektrihind_ee_prognoos','meta') or {} %}
+          {{ (m.outages or []) | length }}
+        attributes:
+          kirjeldus: >
+            {% set m = state_attr('sensor.elektrihind_ee_prognoos','meta') or {} %}
+            {% for o in (m.outages or []) -%}
+            {{ o.name }} ({{ o.border }}, -{{ o.unavailable_mw | int }} MW, {{ o.type }}): {{ o.start | replace('T',' ') }} – {{ o.stop | replace('T',' ') }}
+            {% endfor %}
+
   - binary_sensor:
       # Näide automaatika jaoks: kas praegune tund on päeva 6 odavama hulgas
       - name: "Elektrihind EE odav tund"

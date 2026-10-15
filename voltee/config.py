@@ -24,6 +24,13 @@ FI_FORECAST_URL = os.getenv("FI_FORECAST_URL", "https://sahkovatkain.web.app/pre
 FI_VAT = float(os.getenv("FI_VAT", "1.255"))
 
 ELERING_URL = "https://dashboard.elering.ee/api/nps/price"
+ELERING_CAPACITY_URL = "https://dashboard.elering.ee/api/transmission/cross-border-capacity"
+NORDPOOL_UMM_URL = os.getenv("NORDPOOL_UMM_URL", "https://ummapi.nordpoolgroup.com/messages")
+
+# Hinnapiirkondade EIC-koodid (UMM-teadetes)
+EIC_EE = "10Y1001A1001A39I"
+EIC_FI = "10YFI-1--------U"
+EIC_LV = "10YLV-1001A00074"
 OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
 

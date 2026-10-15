@@ -32,11 +32,30 @@ def synthetic(seed=1) -> pd.DataFrame:
     ee = fi + 25 * np.exp(-df["wind_ee"] / 6) * daily + np.clip(-df["temp_ee"], 0, None) * 1.5 + smooth(20, 3)
     spikes = rng.random(n) < 0.01
     ee = ee + spikes * rng.uniform(100, 400, n)
-    df["price_fi"], df["price_ee"], df["price_lv"] = fi, ee, ee + smooth(10)
+    # Ülekandevõimsus: tavaliselt ~1016 MW (Estlink 1+2), aeg-ajalt mitmepäevased katkestused
+    cap_fi = np.full(n, 1016.0)
+    cap_lv = np.full(n, 1200.0)
+    for _ in range(12):
+        s = rng.integers(0, max(n - 24 * 10, 1))
+        cap_fi[s:s + rng.integers(24, 24 * 6)] -= rng.choice([350, 650, 1016])
+    cap_fi = np.clip(cap_fi, 0, None)
+    lv = ee + smooth(10)
+    # Estlinki katkestuse ajal haakub EE Soomest lahti ja liigub Läti hinna + lisa järgi
+    w = 1 - cap_fi / 1016
+    ee = (1 - w) * ee + w * (lv + 60 * daily)
+    df["price_fi"], df["price_ee"], df["price_lv"] = fi, ee, lv
+    df["cap_fi"], df["cap_lv"] = cap_fi, cap_lv
 
     published = local.normalize() <= (pd.Timestamp.now(tz=config.LOCAL_TZ).normalize() + pd.Timedelta(days=1))
     for c in ("price_fi", "price_ee", "price_lv"):
         df.loc[~published, c] = np.nan
+    # Eleringi võimsus on teada ainult kuni homseni
+    df.loc[~published, ["cap_fi", "cap_lv"]] = np.nan
     fc_mask = (~published) & (idx < now + pd.Timedelta(days=6))
     df["fi_forecast"] = np.where(fc_mask, fi + rng.normal(0, 15, n), np.nan)
-    return df
+    # Üks tulevane plaaniline katkestus (UMM): Estlink 2 maas 3.-4. päeval
+    t0 = (now + pd.Timedelta(days=3)).normalize()
+    outages = [{"border": "fi", "name": "Estlink 2 (demo)", "start": t0,
+                "stop": t0 + pd.Timedelta(days=2), "unavailable_mw": 650.0,
+                "available_mw": 0, "type": "planeeritud"}]
+    return df, outages

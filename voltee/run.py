@@ -24,24 +24,53 @@ def _r(x):
 
 
 def collect(demo=False):
+    """Tagastab (andmed, katkestuste list)."""
     if demo:
         from .demo import synthetic
-        return synthetic()
+        df, outages = synthetic()
+        return fill_future_capacity(df, outages, pd.Timestamp.now(tz="UTC").floor("h")), outages
     prices = fetch.prices()
     weather = fetch.weather()
     fi_fc = fetch.fi_forecast()
-    df = weather.join(prices, how="left").join(fi_fc, how="left")
+    cap = fetch.capacity()
+    df = weather.join(prices, how="left").join(fi_fc, how="left").join(cap, how="left")
+
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    outages = fetch.umm_outages(now - pd.Timedelta(days=1), now + pd.Timedelta(days=config.HORIZON_DAYS + 2))
+    df = fill_future_capacity(df, outages, now)
+    return df, outages
+
+
+def fill_future_capacity(df: pd.DataFrame, outages: list, now: pd.Timestamp) -> pd.DataFrame:
+    """Kus Eleringi võimsust pole (tulevik), võta tavavõimsus (viimase 30 päeva mediaan)
+    ja lahuta UMM-teadetest teada olevad katkestused."""
+    df = df.copy()
+    unav = fetch.outage_hours(outages, df.index)
+    for b in ("fi", "lv"):
+        col = f"cap_{b}"
+        if col not in df:
+            df[col] = np.nan
+        hist = df.loc[(df.index < now) & (df.index >= now - pd.Timedelta(days=30)), col].dropna()
+        if hist.empty:
+            continue  # pole ajalugu -> jätame NaN, mudel saab sellega hakkama
+        normal = float(hist.median())
+        fut = df.index >= now
+        missing = fut & df[col].isna()
+        df.loc[missing, col] = (normal - unav.loc[missing, f"unav_{b}"]).clip(lower=0)
+        # Kui Eleringi tuleviku väärtus on olemas, aga UMM teatab hiljem lisanduvast katkestusest
+        known = fut & ~missing
+        df.loc[known, col] = df.loc[known, col].clip(upper=(normal - unav.loc[known, f"unav_{b}"]).clip(lower=0))
     return df
 
 
-def forecast(df: pd.DataFrame) -> dict:
+def forecast(df: pd.DataFrame, outages: list | None = None) -> dict:
     frame = model.build_features(df)
     full, base, metrics, n_train = model.train(frame)
 
     local_now = pd.Timestamp.now(tz=config.LOCAL_TZ)
     start = local_now.normalize().tz_convert("UTC")
     end = start + pd.Timedelta(days=config.HORIZON_DAYS + 1)
-    fut = frame[(frame.index >= start) & (frame.index < end)].dropna(subset=model.BASE_FEATURES)
+    fut = frame[(frame.index >= start) & (frame.index < end)].dropna(subset=model.REQUIRED_FEATURES)
 
     use_full = fut["fi_price"].notna()
     pred = np.full((len(fut), 3), np.nan)
@@ -62,6 +91,8 @@ def forecast(df: pd.DataFrame) -> dict:
             # "price" = parim teadaolev väärtus: kinnitatud hind või prognoosi mediaan
             "price": actual if actual is not None else _r(p[1]),
             "model": "full" if uf else "base",
+            "cap_fi": _r(row.get("cap_fi")),   # EE<->FI saadaolev võimsus, MW
+            "cap_lv": _r(row.get("cap_lv")),   # EE<->LV saadaolev võimsus, MW
         })
 
     daily = []
@@ -86,6 +117,14 @@ def forecast(df: pd.DataFrame) -> dict:
             "fi_forecast_hours": int(use_full.sum()),
             "holdout": metrics,
             "live_mae_by_day_ahead": live_accuracy(),
+            "outages": [
+                {"border": "EE-FI" if o["border"] == "fi" else "EE-LV", "name": o["name"],
+                 "start": o["start"].tz_convert(config.LOCAL_TZ).strftime("%Y-%m-%dT%H:%M"),
+                 "stop": o["stop"].tz_convert(config.LOCAL_TZ).strftime("%Y-%m-%dT%H:%M"),
+                 "unavailable_mw": o["unavailable_mw"], "type": o["type"]}
+                for o in sorted(outages or [], key=lambda o: o["start"])
+                if o["stop"] > start and o["start"] < end
+            ],
         },
         "hourly": hourly,
         "daily": daily,
@@ -130,7 +169,7 @@ def run_once(demo=False):
     config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
     config.PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    result = forecast(collect(demo))
+    result = forecast(*collect(demo))
     out = config.PUBLIC_DIR / "forecast.json"
     tmp = out.with_suffix(".tmp")
     tmp.write_text(json.dumps(result, ensure_ascii=False, indent=1))

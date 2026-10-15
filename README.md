@@ -20,6 +20,13 @@ Sähkövatkain ──── Soome hinnaprognoos ──────────�
   tegelikku FI hinda, ennustamisel Sähkövatkaini FI prognoosi. Kus see ei ulatu
   (tavaliselt viimased 1–2 päeva), kasutatakse ilma FI hinnata baasmudelit
   (JSON-is `"model": "base"`).
+* **Ülekandeühendused:** EE↔FI (Estlink 1+2) ja EE↔LV saadaolev võimsus (MW) on mudeli
+  tunnused (`cap_fi`, `cap_lv`). Ajalugu ja homne päev tulevad Eleringi
+  `cross-border-capacity` API-st. Kaugemate päevade jaoks võetakse tavavõimsus (viimase 30 päeva
+  mediaan) ja lahutatakse Nord Pooli UMM-teadetest (`ummapi.nordpoolgroup.com`, ilma võtmeta)
+  teada olevad plaanilised ja ootamatud katkestused. Katkestuste nimekiri on JSON-is
+  `meta.outages` all ja HA-s andur `sensor.elektri_uhenduste_katkestused`.
+  NB: suuri katkestusi on ajaloos vähe, seega võib mudel nende mõju alahinnata.
 * **Kinnitatud hinnad:** kui Nord Pool on homse hinna avaldanud (~14:00), näidatakse
   päris hinda (`confirmed: true`) ja prognoos algab ülehomsest.
 * Uuemaid andmeid kaalutakse rohkem (poolestusaeg 180 päeva), sest turg on pärast
