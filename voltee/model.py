@@ -18,9 +18,10 @@ FULL_FEATURES = BASE_FEATURES + ["fi_price"]   # + Soome hind (tegelik või Säh
 
 PARAMS = dict(
     objective="reg:quantileerror", quantile_alpha=QUANTILES,
-    n_estimators=600, learning_rate=0.03, max_depth=6, min_child_weight=5,
-    subsample=0.8, colsample_bytree=0.8, tree_method="hist", n_jobs=0,
+    learning_rate=0.03, max_depth=6, min_child_weight=5,
+    subsample=0.8, colsample_bytree=0.8, tree_method="hist",
 )
+N_ROUNDS = 600
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -49,14 +50,14 @@ def _weights(index: pd.DatetimeIndex, half_life_days=180) -> np.ndarray:
 
 
 def _fit(X, y, w):
-    m = xgb.XGBRegressor(**PARAMS)
-    m.fit(X, y, sample_weight=w)
-    return m
+    # Natiivne xgboosti API: ei vaja scikit-learni
+    dtrain = xgb.DMatrix(X.astype(float), label=y.astype(float), weight=w)
+    return xgb.train(PARAMS, dtrain, num_boost_round=N_ROUNDS)
 
 
 def predict(model, X) -> np.ndarray:
-    p = model.predict(X)
-    return np.sort(p, axis=1)  # tagame p10 <= p50 <= p90
+    p = model.predict(xgb.DMatrix(X.astype(float)))
+    return np.sort(p.reshape(len(X), -1), axis=1)  # tagame p10 <= p50 <= p90
 
 
 def evaluate(frame: pd.DataFrame, features, holdout_days=30) -> dict:
