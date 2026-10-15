@@ -50,6 +50,17 @@ def main():
     now = pd.Timestamp.now(tz="UTC").floor("h")
     idx = pd.date_range(start, now, freq="1h")
     outs = fetch.parse_outages(msgs, start, now + pd.Timedelta(days=31))
+    print("\nParsimise statistika (ajaperioodid):")
+    for k, v in sorted(fetch.PARSE_STATS.items()):
+        print(f"  {k:40s} {v}")
+    statuses = collections.Counter(str(g(m, "eventStatus")) for m in msgs)
+    print(f"  eventStatus väärtused: {dict(statuses)}")
+    sample = next((m for m in msgs if any(
+        g(u, "name") == units.most_common(1)[0][0] for u in (g(m, "productionUnits", []) or []))), None) \
+        if units else None
+    if sample:
+        print("\nNäidis-teade (lühendatud):")
+        print("  " + json.dumps(sample, ensure_ascii=False)[:1500])
     hist = fetch.outage_hours(outs, idx)
     gen = hist["unav_gen"]
     print(f"\nEesti jaamad maas ajaloos ({start.date()}..{now.date()}):")

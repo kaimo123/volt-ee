@@ -2,6 +2,7 @@
 
 Kõik funktsioonid tagastavad pandas DataFrame'i, mille indeks on tunnipõhine UTC aeg.
 """
+import collections
 import json
 import logging
 import time
@@ -306,12 +307,18 @@ def _is_ee_unit(unit: dict) -> bool:
     return config.EIC_EE in s or "estonia" in s.lower() or '"ee"' in s.lower()
 
 
+PARSE_STATS = collections.Counter()
+
+
 def parse_outages(messages: list, start: pd.Timestamp, end: pd.Timestamp) -> list:
     """UMM-teadetest katkestused ajavahemikus [start, end).
     kind='transmission' (border 'fi'/'lv') või kind='production' (Eesti jaamad, border 'gen')."""
     out = []
+    st = PARSE_STATS
+    st.clear()
     for m in messages:
         if _inactive(m):
+            st["sõnum: mitteaktiivne"] += 1
             continue
         utype = _UTYPE.get(str(_g(m, "unavailabilityType", "")).lower(), str(_g(m, "unavailabilityType", "")))
         units = []
@@ -325,31 +332,54 @@ def parse_outages(messages: list, start: pd.Timestamp, end: pd.Timestamp) -> lis
         for kind, border, unit in units:
             installed = _g(unit, "installedCapacity")
             for tp in _g(unit, "timePeriods", []) or []:
+                st[f"{kind}: perioode kokku"] += 1
                 try:
                     t0, t1 = _utc(_g(tp, "eventStart")), _utc(_g(tp, "eventStop"))
                 except Exception:  # noqa: BLE001
+                    st[f"{kind}: aeg ei parsi"] += 1
                     continue
                 if t1 <= start or t0 >= end:
+                    st[f"{kind}: väljaspool ajavahemikku"] += 1
                     continue
                 if (t1 - t0) > pd.Timedelta(days=config.MAX_OUTAGE_DAYS):
                     # Konserveeritud/suletud jaam või ühendus: püsimuutus, mitte katkestus
+                    st[f"{kind}: liiga pikk"] += 1
                     continue
                 unav = _g(tp, "unavailableCapacity")
                 avail = _g(tp, "availableCapacity")
                 if unav is None and installed is not None and avail is not None:
                     unav = installed - avail
                 if not unav:
+                    st[f"{kind}: võimsus puudub/0"] += 1
                     continue
+                st[f"{kind}: kasutatud"] += 1
                 out.append({"kind": kind, "border": border, "name": _g(unit, "name", ""),
                             "start": t0, "stop": t1, "unavailable_mw": float(unav),
                             "available_mw": avail, "type": utype})
     return out
 
 
+BORDER_MAX_MW = {"fi": 1016.0, "lv": 2000.0}
+
+
 def outage_hours(outages: list, index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Katkestuste summa (MW) tunni kaupa: unav_fi, unav_lv (ühendused), unav_gen (Eesti jaamad)."""
-    df = pd.DataFrame(0.0, index=index, columns=["unav_fi", "unav_lv", "unav_gen"])
+    """Katkestused (MW) tunni kaupa: unav_fi, unav_lv (ühendused), unav_gen (Eesti jaamad).
+
+    Sama üksuse kohta võib olla mitu kattuvat teadet (nt Elering ja Fingrid avaldavad sama
+    Estlinki katkestuse, või eraldi suundade kaupa). Seega võetakse iga üksuse kohta tunni
+    MAKSIMUM ja alles siis summeeritakse üle eri üksuste. Ühenduste summa piiratakse
+    füüsilise võimsusega."""
+    per_unit = {}
     for o in outages:
+        key = (o["border"], (o["name"] or "?").strip().lower())
+        s = per_unit.get(key)
+        if s is None:
+            s = per_unit[key] = pd.Series(0.0, index=index)
         mask = (index >= o["start"].floor("h")) & (index < o["stop"])
-        df.loc[mask, f"unav_{o['border']}"] += o["unavailable_mw"]
+        s[mask] = s[mask].clip(lower=o["unavailable_mw"])
+    df = pd.DataFrame(0.0, index=index, columns=["unav_fi", "unav_lv", "unav_gen"])
+    for (border, _), s in per_unit.items():
+        df[f"unav_{border}"] += s
+    for b, mx in BORDER_MAX_MW.items():
+        df[f"unav_{b}"] = df[f"unav_{b}"].clip(upper=mx)
     return df
