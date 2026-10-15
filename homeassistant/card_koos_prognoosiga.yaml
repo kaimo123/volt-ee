@@ -1,0 +1,199 @@
+# Täna/homme Nord Pooli hinnad + volt-ee 7 päeva prognoos samal graafikul.
+# Vajab: apexcharts-card, sensor.nordpool_import / nordpool_sell (Eesti mall),
+# sensor.elektrihind_ee_prognoos ja sensor.elektrihind_ee_lopphind (volt_ee.yaml).
+# Prognoos algab automaatselt sealt, kus kinnitatud Nord Pooli hinnad lõpevad.
+type: custom:apexcharts-card
+graph_span: 8d
+span:
+  start: day
+hours_12: false
+header:
+  show: true
+  title: Elektrihind + 7 päeva prognoos (€/kWh)
+  show_states: true
+  colorize_states: true
+now:
+  show: true
+  label: Hetkel
+  color: '#4caf50'
+experimental:
+  color_threshold: true
+yaxis:
+  - min: ~0
+    decimals: 2
+    apex_config:
+      forceNiceScale: true
+      tickAmount: 5
+all_series_config:
+  type: line
+  curve: stepline
+  stroke_width: 2
+  float_precision: 3
+  extend_to: false
+  show:
+    legend_value: false
+    in_header: false
+series:
+  - entity: sensor.nordpool_import
+    name: Ostuhind
+    color: '#ff9800'
+    unit: ' €/kWh'
+    type: area
+    opacity: 0.25
+    stroke_width: 3
+    show:
+      in_header: true
+      extremas: true
+    color_threshold:
+      - value: 0
+        color: '#1e90ff'
+      - value: 0.1
+        color: '#2e7d32'
+      - value: 0.2
+        color: '#daa520'
+      - value: 0.3
+        color: '#e53935'
+    data_generator: >
+      const p = [...(entity.attributes.raw_today || []),
+      ...(entity.attributes.raw_tomorrow || [])];
+
+      return p.map(x => [new Date(x.start).getTime(), x.value]);
+  - entity: sensor.elektrihind_ee_lopphind
+    name: Prognoos (ostuhind)
+    color: '#ff9800'
+    type: line
+    stroke_width: 3
+    stroke_dash: 5
+    show:
+      extremas: true
+    data_generator: >
+      const np = hass.states['sensor.nordpool_import'];
+
+      const known = np ? [...(np.attributes.raw_today || []), ...(np.attributes.raw_tomorrow || [])] : [];
+
+      const lastEnd = known.length ? Math.max(...known.map(x => new Date(x.end || x.start).getTime())) : 0;
+
+      return (entity.attributes.raw_all || [])
+        .map(x => [new Date(x.start).getTime(), x.value])
+        .filter(x => x[0] >= lastEnd);
+  - entity: sensor.elektrihind_ee_lopphind
+    name: Prognoosi vahemik (p90)
+    color: '#ffcc80'
+    stroke_width: 1
+    stroke_dash: 2
+    data_generator: >
+      const np = hass.states['sensor.nordpool_import'];
+
+      const known = np ? [...(np.attributes.raw_today || []), ...(np.attributes.raw_tomorrow || [])] : [];
+
+      const lastEnd = known.length ? Math.max(...known.map(x => new Date(x.end || x.start).getTime())) : 0;
+
+      const pr = hass.states['sensor.elektrihind_ee_prognoos'];
+
+      const sell = hass.states['sensor.nordpool_sell'];
+
+      const cents = sell && String(sell.attributes.price_in_cents).toLowerCase() === 'true';
+
+      const km = 1 + parseFloat((hass.states['input_number.kaibemaks'] || {state: 0}).state || 0) / 100;
+
+      const q = {};
+
+      ((pr && pr.attributes.hourly) || []).forEach(r => { q[new Date(r.ts_utc.replace('Z', ':00Z')).getTime()] = r; });
+
+      return (entity.attributes.raw_all || [])
+        .map(x => { const t = new Date(x.start).getTime(); const r = q[t];
+          return r ? [t, x.value + (r.p90 - r.p50) / (cents ? 10 : 1000) * km] : null; })
+        .filter(x => x && x[0] >= lastEnd);
+  - entity: sensor.elektrihind_ee_lopphind
+    name: Prognoosi vahemik (p10)
+    color: '#ffcc80'
+    stroke_width: 1
+    stroke_dash: 2
+    data_generator: >
+      const np = hass.states['sensor.nordpool_import'];
+
+      const known = np ? [...(np.attributes.raw_today || []), ...(np.attributes.raw_tomorrow || [])] : [];
+
+      const lastEnd = known.length ? Math.max(...known.map(x => new Date(x.end || x.start).getTime())) : 0;
+
+      const pr = hass.states['sensor.elektrihind_ee_prognoos'];
+
+      const sell = hass.states['sensor.nordpool_sell'];
+
+      const cents = sell && String(sell.attributes.price_in_cents).toLowerCase() === 'true';
+
+      const km = 1 + parseFloat((hass.states['input_number.kaibemaks'] || {state: 0}).state || 0) / 100;
+
+      const q = {};
+
+      ((pr && pr.attributes.hourly) || []).forEach(r => { q[new Date(r.ts_utc.replace('Z', ':00Z')).getTime()] = r; });
+
+      return (entity.attributes.raw_all || [])
+        .map(x => { const t = new Date(x.start).getTime(); const r = q[t];
+          return r ? [t, x.value + (r.p10 - r.p50) / (cents ? 10 : 1000) * km] : null; })
+        .filter(x => x && x[0] >= lastEnd);
+  - entity: sensor.nordpool_sell
+    name: NP börs
+    color: '#42a5f5'
+    data_generator: >
+      const p = [...(entity.attributes.raw_today || []),
+      ...(entity.attributes.raw_tomorrow || [])];
+
+      return p.map(x => [new Date(x.start).getTime(), x.value]);
+  - entity: sensor.elektri_ostuhind_array_2
+    name: Vana hind
+    color: '#9e9e9e'
+    data_generator: >
+      const p = [...(entity.attributes.raw_today || []),
+      ...(entity.attributes.raw_tomorrow || [])];
+
+      return p.map(x => [new Date(x.start).getTime(), x.value]);
+  - entity: sensor.elektri_muugihind
+    name: Müügihind
+    color: '#8d6e63'
+    data_generator: >
+      const p = [...(entity.attributes.raw_today || []),
+      ...(entity.attributes.raw_tomorrow || [])];
+
+      return p.map(x => [new Date(x.start).getTime(), x.value]);
+apex_config:
+  chart:
+    height: 450
+    animations:
+      enabled: false
+    zoom:
+      enabled: true
+      type: x
+      autoScaleYaxis: true
+    toolbar:
+      show: true
+      tools:
+        download: false
+  tooltip:
+    shared: true
+    x:
+      format: ddd dd.MM HH:mm
+  xaxis:
+    labels:
+      datetimeFormatter:
+        hour: HH:mm
+        day: dd.MM
+  legend:
+    position: bottom
+    fontSize: 12px
+    itemMargin:
+      horizontal: 8
+  grid:
+    borderColor: rgba(128,128,128,0.2)
+  annotations:
+    xaxis:
+      - x: EVAL:new Date().setHours(24,0,0,0)
+        borderColor: '#888'
+        strokeDashArray: 4
+        label:
+          text: Homme
+          orientation: horizontal
+          offsetY: -10
+          style:
+            background: '#888'
+            color: '#fff'

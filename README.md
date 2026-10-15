@@ -91,6 +91,7 @@ Kõik failid on kaustas [`homeassistant/`](homeassistant/).
 | `volt_ee.yaml` | `/config/packages/volt_ee.yaml` | andurid (asenda `SERVERI_IP`) |
 | `card_lopphind.yaml` | armatuurlaud → Käsitsi | lõpphinna graafik |
 | `card.yaml` | armatuurlaud → Käsitsi | börsihinna graafik koos p10–p90 vahemikuga |
+| `card_koos_prognoosiga.yaml` | armatuurlaud → Käsitsi | Nord Pooli täna/homme 15-min hinnad + 7 p prognoos ühel graafikul |
 
 1. Kopeeri **`volt_ee.jinja`** kausta `/config/custom_templates/`.
 2. Kopeeri **`volt_ee.yaml`** kausta `/config/packages/` ja asenda `SERVERI_IP`.
