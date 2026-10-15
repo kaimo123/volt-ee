@@ -188,8 +188,8 @@ def run_once(demo=False):
 
 def schedule():
     log.info("Ajakava: %s (%s)", ", ".join(config.RUN_TIMES), config.LOCAL_TZ)
-    if not (config.PUBLIC_DIR / "forecast.json").exists():
-        _safe_run()
+    # Käivitumisel (nt pärast uuendust või restarti) tee prognoos kohe, et see oleks värske
+    _safe_run()
     done = set()
     while True:
         now = pd.Timestamp.now(tz=config.LOCAL_TZ)
