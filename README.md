@@ -69,6 +69,38 @@ Raspberry Pi 4/5 peal toimib (treenimine ~1 min).
 
 Hinnad on **börsihinnad ilma käibemaksu ja võrgutasudeta** (€/MWh; c/kWh = /10).
 
+### EMHASS
+
+`homeassistant/volt_ee.jinja` teisendab prognoosi EMHASS-i vormingusse
+(€/kWh, ajatempel → hind, lisab marginaali, võrgutasu päev/öö, muud tasud ja km).
+
+1. Kopeeri fail HA-s kausta `/config/custom_templates/volt_ee.jinja`.
+2. **Muuda faili alguses olevad tasud oma lepingu järgi.**
+3. Arendaja tööriistad → YAML → **Laadi uuesti mallid**.
+4. Kasuta EMHASS-i kutses, nt:
+
+```yaml
+rest_command:
+  emhass_mpc:
+    url: http://EMHASS_IP:5000/action/naive-mpc-optim
+    method: post
+    content_type: application/json
+    timeout: 60
+    payload: >
+      {% from 'volt_ee.jinja' import volt_import, volt_export %}
+      {
+        "prediction_horizon": 48,
+        "load_cost_forecast": {{ volt_import(48) }},
+        "prod_price_forecast": {{ volt_export(48) }}
+      }
+```
+
+Kontroll: Arendaja tööriistad → Mall, kleebi
+`{% from 'volt_ee.jinja' import volt_import %}{{ volt_import(48) }}`.
+
+Ajatemplitega kuju töötab nii 30- kui 60-minutilise `optimization_time_step`-iga.
+`prediction_horizon` sammudes: 30 min sammuga 48 = 24 h, 60 min sammuga 48 = 48 h.
+
 ## JSON-i formaat
 
 ```jsonc

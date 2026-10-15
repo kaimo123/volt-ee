@@ -1,0 +1,51 @@
+{#
+  volt-ee -> EMHASS hinnaprognoos.
+  Pane see fail Home Assistantis kausta /config/custom_templates/volt_ee.jinja
+  ja vali Arendaja tööriistad -> YAML -> "Laadi uuesti mallid" (või taaskäivita HA).
+
+  Kasutamine EMHASS-i kutses:
+    {% from 'volt_ee.jinja' import volt_import, volt_export %}
+    "load_cost_forecast": {{ volt_import(48) }},
+    "prod_price_forecast": {{ volt_export(48) }}
+
+  Tulemus on JSON-objekt kujul {"2026-10-16T09:00:00+00:00": 0.1234, ...} (€/kWh).
+  EMHASS loeb iga väärtuse kehtivaks kuni järgmise ajatemplini, seega sobib
+  nii 30- kui ka 60-minutilise optimization_time_step-iga.
+
+  >>> MUUDA ALLOLEVAD TASUD OMA LEPINGU JÄRGI (€/kWh, ilma käibemaksuta) <<<
+#}
+{% macro _volt(kind, hours) %}
+{%- set marginaal       = 0.0050 -%}  {# elektrimüüja marginaal ostul #}
+{%- set vork_paev       = 0.0600 -%}  {# võrgutasu päevasel ajal #}
+{%- set vork_oo         = 0.0350 -%}  {# võrgutasu öösel ja nädalavahetusel #}
+{%- set muud_tasud      = 0.0150 -%}  {# taastuvenergia tasu, aktsiis, varustuskindlus jms #}
+{%- set km              = 1.24   -%}  {# käibemaks #}
+{%- set muugi_marginaal = 0.0030 -%}  {# päikesejaama müügil maha arvatav marginaal #}
+{%- set rows = state_attr('sensor.elektrihind_ee_prognoos', 'hourly') or [] -%}
+{%- set alates = now() - timedelta(hours=1) -%}
+{%- set ns = namespace(out=[], n=0) -%}
+{%- for r in rows -%}
+  {%- if r.price is number -%}
+    {%- set ts = as_datetime(r.ts_utc | replace('Z', ':00+00:00')) -%}
+    {%- if ts > alates and ns.n < hours -%}
+      {%- set spot = r.price / 1000 -%}
+      {%- set lt = as_local(ts) -%}
+      {%- set oo = lt.hour < 7 or lt.hour >= 22 or lt.weekday() >= 5 -%}
+      {%- if kind == 'import' -%}
+        {%- set v = (spot + marginaal + (vork_oo if oo else vork_paev) + muud_tasud) * km -%}
+      {%- else -%}
+        {%- set v = spot - muugi_marginaal -%}
+      {%- endif -%}
+      {%- set ns.out = ns.out + ['"' ~ ts.isoformat() ~ '": ' ~ (v | round(5))] -%}
+      {%- set ns.n = ns.n + 1 -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{{ '{' ~ (ns.out | join(', ')) ~ '}' }}
+{%- endmacro %}
+
+{# Ostuhind (€/kWh, koos tasude ja km-ga) järgmiseks N tunniks #}
+{% macro volt_import(hours=48) %}{{ _volt('import', hours) }}{% endmacro %}
+
+{# Müügihind (€/kWh) järgmiseks N tunniks #}
+{% macro volt_export(hours=48) %}{{ _volt('export', hours) }}{% endmacro %}
