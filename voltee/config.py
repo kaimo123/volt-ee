@@ -27,6 +27,9 @@ ELERING_URL = "https://dashboard.elering.ee/api/nps/price"
 ELERING_CAPACITY_URL = "https://dashboard.elering.ee/api/transmission/cross-border-capacity"
 NORDPOOL_UMM_URL = os.getenv("NORDPOOL_UMM_URL", "https://ummapi.nordpoolgroup.com/messages")
 
+# Pikemad UMM-katkestused on püsimuutused (konserveeritud jaam), mitte hooldus -> välja
+MAX_OUTAGE_DAYS = int(os.getenv("MAX_OUTAGE_DAYS", "60"))
+
 # Hinnapiirkondade EIC-koodid (UMM-teadetes)
 EIC_EE = "10Y1001A1001A39I"
 EIC_FI = "10YFI-1--------U"

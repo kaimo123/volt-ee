@@ -331,6 +331,9 @@ def parse_outages(messages: list, start: pd.Timestamp, end: pd.Timestamp) -> lis
                     continue
                 if t1 <= start or t0 >= end:
                     continue
+                if (t1 - t0) > pd.Timedelta(days=config.MAX_OUTAGE_DAYS):
+                    # Konserveeritud/suletud jaam või ühendus: püsimuutus, mitte katkestus
+                    continue
                 unav = _g(tp, "unavailableCapacity")
                 avail = _g(tp, "availableCapacity")
                 if unav is None and installed is not None and avail is not None:

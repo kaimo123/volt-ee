@@ -28,7 +28,9 @@ Sähkövatkain ──── Soome hinnaprognoos ──────────�
   `meta.outages` all ja HA-s andur `sensor.elektri_uhenduste_katkestused`.
 * **Eesti jaamad:** Auvere, Eesti, Balti, Iru jt jaamade katkestused (MW kokku) tulevad samuti
   Nord Pooli UMM-teadetest ja on tunnus `gen_out_ee` - nii treeningajaloos kui prognoosis.
-  Teated puhverdatakse faili `data/cache/umm.json`.
+  Teated puhverdatakse faili `data/cache/umm.json`. Üle 60 päeva kestvad "katkestused"
+  (konserveeritud jaamad) jäetakse välja (`MAX_OUTAGE_DAYS`).
+  Kontroll: `docker compose exec forecaster python -m voltee.diag`.
   NB: suuri katkestusi on ajaloos vähe, seega võib mudel nende mõju alahinnata.
 * **Kinnitatud hinnad:** kui Nord Pool on homse hinna avaldanud (~14:00), näidatakse
   päris hinda (`confirmed: true`) ja prognoos algab ülehomsest.
