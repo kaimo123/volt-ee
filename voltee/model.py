@@ -86,6 +86,9 @@ def evaluate(frame: pd.DataFrame, features, holdout_days=30) -> dict:
     }
 
 
+ABLATION_TOLERANCE = 0.03
+
+
 def usable_optional(data: pd.DataFrame, min_share=0.01) -> list:
     """Valikulised tunnused, millel on treeningandmetes sisu: vähemalt 1% ridadest
     on väärtus olemas JA see erineb tavapärasest (mediaanist). Muidu on tunnus müra."""
@@ -106,12 +109,30 @@ def train(frame: pd.DataFrame):
     full_data = data.dropna(subset=["fi_price"])
     opt = usable_optional(data)
     dropped = [c for c in CAP_FEATURES if c not in opt]
-    base_f = REQUIRED_FEATURES + opt
-    full_f = base_f + ["fi_price"]
     log.info("Treeningridu: %d (FI hinnaga %d); valikulised tunnused: %s%s", len(data), len(full_data),
              opt or "-", f" (sisu puudub, välja jäetud: {dropped})" if dropped else "")
-    metrics = {"base": evaluate(data, base_f), "full": evaluate(full_data, full_f),
-               "features": full_f}
+
+    # Kõrvutitest samadel andmetel: kas katkestuste/võimsuse tunnused parandavad tulemust?
+    # Jäetakse alles, kui viga ei kasva üle ABLATION_TOLERANCE (katkestusi on harva, seega
+    # lubame väikest halvenemist, et mudel oskaks neid harvu juhtumeid arvestada).
+    with_opt = evaluate(full_data, REQUIRED_FEATURES + opt + ["fi_price"])
+    full_metrics = with_opt
+    ablation = {"with": with_opt.get("mae")}
+    if opt:
+        without = evaluate(full_data, REQUIRED_FEATURES + ["fi_price"])
+        ablation["without"] = without.get("mae")
+        if with_opt and without and with_opt["mae"] > without["mae"] * (1 + ABLATION_TOLERANCE):
+            log.info("Kõrvutitest: valikulistega MAE %.2f, ilma %.2f -> jätan %s välja",
+                     with_opt["mae"], without["mae"], opt)
+            opt = []
+            full_metrics = without
+        else:
+            log.info("Kõrvutitest: valikulistega MAE %s, ilma %s -> kasutan %s",
+                     with_opt.get("mae"), without.get("mae"), opt)
+    base_f = REQUIRED_FEATURES + opt
+    full_f = base_f + ["fi_price"]
+    metrics = {"base": evaluate(data, base_f), "full": full_metrics,
+               "features": full_f, "ablation_mae": ablation}
     base = _fit(data[base_f], data["price_ee"], _weights(data.index))
     full = _fit(full_data[full_f], full_data["price_ee"], _weights(full_data.index))
     return full, base, metrics, len(data), full_f, base_f

@@ -229,6 +229,9 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
   Eesti jaamade teateid on vaid 2025. aasta alguseni — siis jääb tunnus automaatselt välja.
 * **Automaatne tunnuste valik:** valikulised tunnused, millel treeningandmetes sisu pole
   (alla 1% erinevaid väärtusi), jäetakse välja. Kasutatud tunnused: `meta.holdout.features`.
+* **Kõrvutitest:** igal käivitusel testitakse viimasel 30 päeval mudelit katkestuste/võimsuse
+  tunnustega ja ilma. Kui need halvendavad viga üle 3%, jäetakse need välja.
+  Tulemus: `meta.holdout.ablation_mae` (`with` / `without`) ja logirida `Kõrvutitest: ...`.
 * Üle 60 päeva kestvad "katkestused" (konserveeritud jaamad) jäetakse välja (`MAX_OUTAGE_DAYS`).
 
 ---

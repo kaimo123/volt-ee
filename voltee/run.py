@@ -199,7 +199,13 @@ def schedule():
     log.info("Ajakava: %s (%s)", ", ".join(config.RUN_TIMES), config.LOCAL_TZ)
     # Käivitumisel (nt pärast uuendust või restarti) tee prognoos kohe, et see oleks värske
     _safe_run()
+    # Ajaaken, mille sees just käivitusime, loetakse tehtuks (muidu jookseks kohe teist korda)
+    now = pd.Timestamp.now(tz=config.LOCAL_TZ)
     done = set()
+    for t in config.RUN_TIMES:
+        slot = pd.Timestamp(f"{now.date()} {t}", tz=config.LOCAL_TZ)
+        if slot <= now < slot + pd.Timedelta(minutes=30):
+            done.add(slot)
     while True:
         now = pd.Timestamp.now(tz=config.LOCAL_TZ)
         for t in config.RUN_TIMES:
