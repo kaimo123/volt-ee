@@ -5,6 +5,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/data
+    # Saladused (nt ENTSOE_TOKEN) failis .env - seda GitHubi ei panda
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Millal ennustus uuendatakse (kohalik aeg)
       RUN_TIMES: "06:15,14:15,20:15"

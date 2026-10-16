@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from . import config, fetch, model
+from . import config, entsoe_src, fetch, model
 
 log = logging.getLogger("voltee")
 
@@ -37,11 +37,20 @@ def collect(demo=False):
 
     now = pd.Timestamp.now(tz="UTC").floor("h")
     msgs = fetch.umm_messages()
-    outages = fetch.parse_outages(msgs, df.index.min(), df.index.max() + pd.Timedelta(hours=1))
+    outages = all_outages(msgs, entsoe_src.fetch(), df.index.min(), df.index.max() + pd.Timedelta(hours=1))
     # Eesti jaamade (Auvere, Eesti, Balti, Iru jt) katkestuste summa, MW - nii ajalugu kui tulevik
     df["gen_out_ee"] = fetch.outage_hours(outages, df.index)["unav_gen"]
     df = fill_future_capacity(df, outages, now)
     return df, outages
+
+
+def all_outages(msgs: list, entsoe_df, start, end) -> list:
+    """Ühendused Nord Pooli UMM-ist; Eesti jaamad ENTSO-E-st, kui see on olemas, muidu UMM-ist."""
+    umm = fetch.parse_outages(msgs, start, end)
+    gen = entsoe_src.outages(entsoe_df, start, end)
+    if entsoe_df is not None and not entsoe_df.empty:
+        umm = [o for o in umm if o["kind"] != "production"]
+    return umm + gen
 
 
 def fill_future_capacity(df: pd.DataFrame, outages: list, now: pd.Timestamp) -> pd.DataFrame:

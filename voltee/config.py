@@ -27,6 +27,13 @@ ELERING_URL = "https://dashboard.elering.ee/api/nps/price"
 ELERING_CAPACITY_URL = "https://dashboard.elering.ee/api/transmission/cross-border-capacity"
 NORDPOOL_UMM_URL = os.getenv("NORDPOOL_UMM_URL", "https://ummapi.nordpoolgroup.com/messages")
 
+# ENTSO-E Transparency Platform token (valikuline). Pane see serveris faili .env:
+#   ENTSOE_TOKEN=xxxxxxxx-xxxx-...
+# Ilma tokenita töötab kõik muu; Eesti jaamade katkestused jäävad siis välja.
+ENTSOE_TOKEN = os.getenv("ENTSOE_TOKEN", "").strip()
+# Väiksemaid jaamu (nt üksikud tuulikud) ei arvestata
+ENTSOE_MIN_MW = float(os.getenv("ENTSOE_MIN_MW", "20"))
+
 # Pikemad UMM-katkestused on püsimuutused (konserveeritud jaam), mitte hooldus -> välja
 MAX_OUTAGE_DAYS = int(os.getenv("MAX_OUTAGE_DAYS", "60"))
 

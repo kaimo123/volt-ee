@@ -8,7 +8,7 @@ import json
 
 import pandas as pd
 
-from . import config, fetch
+from . import config, entsoe_src, fetch, run
 
 
 def main():
@@ -49,31 +49,28 @@ def main():
     start = pd.Timestamp(config.TRAIN_START, tz="UTC")
     now = pd.Timestamp.now(tz="UTC").floor("h")
     idx = pd.date_range(start, now, freq="1h")
-    outs = fetch.parse_outages(msgs, start, now + pd.Timedelta(days=31))
-    print("\nParsimise statistika (ajaperioodid):")
+    ent = entsoe_src.fetch(offline=True)
+    outs = run.all_outages(msgs, ent, start, now + pd.Timedelta(days=31))
+    print("\nUMM parsimise statistika (ajaperioodid):")
     for k, v in sorted(fetch.PARSE_STATS.items()):
         print(f"  {k:40s} {v}")
-    statuses = collections.Counter(str(g(m, "eventStatus")) for m in msgs)
-    print(f"  eventStatus väärtused: {dict(statuses)}")
-    sample = next((m for m in msgs if any(
-        g(u, "name") == units.most_common(1)[0][0] for u in (g(m, "productionUnits", []) or []))), None) \
-        if units else None
-    # Ajatemplite kuju ja jaotus aastate kaupa
-    years = collections.Counter()
-    raw_example = None
-    for m in msgs:
-        for u in (g(m, "productionUnits", []) or []) + (g(m, "generationUnits", []) or []):
-            if not fetch._is_ee_unit(u):
-                continue
-            for tp in g(u, "timePeriods", []) or []:
-                raw = g(tp, "eventStart")
-                raw_example = raw_example if raw_example is not None else raw
-                try:
-                    years[fetch._utc(raw).year] += 1
-                except Exception:  # noqa: BLE001
-                    years["viga"] += 1
-    print(f"  eventStart toorväärtus: {raw_example!r} (tüüp {type(raw_example).__name__})")
-    print(f"  tootmisperioodid aastate kaupa: {dict(sorted(years.items(), key=str))}")
+
+    # --- ENTSO-E
+    print("\nENTSO-E (Eesti jaamad):")
+    if not config.ENTSOE_TOKEN:
+        print("  token puudub (.env failis ENTSOE_TOKEN) - Eesti jaamad tulevad UMM-ist")
+    if ent.empty:
+        print("  puhver tühi - käivita enne: python -m voltee.run")
+    else:
+        e = entsoe_src.outages(ent, start, now + pd.Timedelta(days=60))
+        print(f"  puhvris {len(ent)} lõiku, {ent['mrid'].nunique()} teadet; kasutusel {len(e)} lõiku "
+              f"(>= {config.ENTSOE_MIN_MW:.0f} MW, aktiivsed, uusim versioon, <= {config.MAX_OUTAGE_DAYS} p)")
+        by = collections.defaultdict(lambda: [0, 0.0])
+        for o in e:
+            by[o["name"]][0] += 1
+            by[o["name"]][1] = max(by[o["name"]][1], o["unavailable_mw"])
+        for name, (n, mw) in sorted(by.items(), key=lambda x: -x[1][0])[:20]:
+            print(f"  {name[:34]:34s} {n:5d} lõiku, suurim {mw:6.0f} MW")
     hist = fetch.outage_hours(outs, idx)
     gen = hist["unav_gen"]
     print(f"\nEesti jaamad maas ajaloos ({start.date()}..{now.date()}):")
@@ -103,10 +100,6 @@ def main():
         print(f"  {lbl[o['border']]:5s} {o['name'][:28]:28s} "
               f"{o['start'].tz_convert(config.LOCAL_TZ):%d.%m %H:%M} -> "
               f"{o['stop'].tz_convert(config.LOCAL_TZ):%d.%m %H:%M}  -{o['unavailable_mw']:.0f} MW  {o['type']}")
-
-    if sample:
-        print("\nNäidis-teade (lühendatud):")
-        print("  " + json.dumps(sample, ensure_ascii=False)[:1200])
 
 
 if __name__ == "__main__":

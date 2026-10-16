@@ -8,7 +8,8 @@ optimeerimiseks (nt [EMHASS](https://emhass.readthedocs.io)) on aga kasulik näh
 * ennustab Nord Pooli **Eesti hinnapiirkonna** börsihinda **tunni kaupa 7 päeva ette**
   (koos vahemikuga p10/p50/p90),
 * kasutab teadaolevaid **kinnitatud hindu** seal, kus need on olemas (täna ja homme),
-* arvestab **ülekandeühenduste katkestusi** (Estlink, EE–LV),
+* arvestab **ülekandeühenduste katkestusi** (Estlink, EE–LV) ja **Eesti jaamade hooldusi**
+  (Auvere, Narva plokid — ENTSO-E kaudu),
 * annab Home Assistantile andurid ja **EMHASS-ile valmis hinnaprognoosi €/kWh-des** koos
   Elektrilevi võrgutasude (päev/öö/tipuajad), kõigi lisatasude ja käibemaksuga.
 
@@ -23,7 +24,8 @@ Idee pärineb Soome projektist [Sähkövatkain](https://sahkovatkain.web.app)
 Elering ──────── EE/FI/LV hinnad, ülekandevõimsused ─┐
 Open-Meteo ───── tuul 100 m (EE/LV/FI), temp, päike ─┤
 Sähkövatkain ─── Soome hinnaprognoos ────────────────┼─> XGBoost ─> forecast.json ─> nginx :8088
-Nord Pool UMM ── Estlinki / EE-LV katkestused ───────┘  (p10/p50/p90)        │
+Nord Pool UMM ── Estlinki / EE-LV katkestused ───────┤  (p10/p50/p90)        │
+ENTSO-E ──────── Auvere / Narva plokkide katkestused ┘                       │
                                                                               ▼
                        Home Assistant: andurid + volt_ee.jinja ─> EMHASS (€/kWh, koos tasudega)
 ```
@@ -54,6 +56,25 @@ UMM-teated) ja võtab paar minutit. Kui logis on `Valmis ... holdout MAE ...`, o
 ```
 http://SERVERI_IP:8088/forecast.json
 ```
+
+### ENTSO-E token (valikuline, soovitatav)
+
+Eesti jaamade (Auvere, Narva plokid) katkestused tulevad
+[ENTSO-E Transparency Platformilt](https://transparency.entsoe.eu). Token on tasuta:
+
+1. Registreeru: transparency.entsoe.eu → **Login → Register**.
+2. Saada e-kiri aadressile **transparency@entsoe.eu**, teema `Restful API access`,
+   sisus oma registreerimise e-post. Vastus tuleb tavaliselt 1–2 tööpäevaga.
+3. **My Account Settings → Web API Security Token → Generate a new token.**
+4. Serveris, kaustas `volt-ee`:
+   ```bash
+   nano .env          # kirjuta: ENTSOE_TOKEN=sinu-token
+   chmod 600 .env
+   docker compose up -d --build
+   ```
+
+`.env` on `.gitignore`-is — tokenit GitHubi ei lähe. Ilma tokenita töötab kõik muu.
+Esimesel korral laetakse ajalugu alates 02/2025, edaspidi ainult viimased 30 päeva ja tulevik.
 
 **Uuendamine:**
 ```bash
@@ -191,7 +212,8 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
 | [Elering](https://dashboard.elering.ee) | EE/FI/LV börsihinnad, EE↔FI/LV ülekandevõimsus | ei |
 | [Open-Meteo](https://open-meteo.com) | tuul 100 m, temperatuur, päikesekiirgus (arhiiv + prognoos) | ei |
 | [Sähkövatkain](https://sahkovatkain.web.app) | Soome hinnaprognoos | ei |
-| [Nord Pool UMM](https://umm.nordpoolgroup.com) | ülekandeühenduste ja jaamade katkestused | ei |
+| [Nord Pool UMM](https://umm.nordpoolgroup.com) | ülekandeühenduste katkestused | ei |
+| [ENTSO-E](https://transparency.entsoe.eu) | Eesti jaamade katkestused (dokument A80) | **jah**, tasuta |
 
 * **Mudel:** XGBoost kvantiilregressioon (p10, p50, p90), treenitakse iga käivitusega uuesti.
   Uuemaid andmeid kaalutakse rohkem (poolestusaeg 180 päeva), sest turg muutus pärast
@@ -202,7 +224,9 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
 * **Ülekandeühendused** (`cap_fi`, `cap_lv`, MW): ajalugu ja homne päev Eleringist;
   kaugemale tavavõimsus (30 p mediaan) miinus UMM-teadetes teada olevad katkestused.
   Sama üksuse kattuvaid teateid ei liideta; summa piiratakse füüsilise võimsusega.
-* **Eesti jaamad** (`gen_out_ee`): UMM-teadetest. *Vt piiranguid allpool.*
+* **Eesti jaamad** (`gen_out_ee`, MW maas): ENTSO-E-st (aktiivsed teated, iga teate uusim
+  versioon, üksused alates `ENTSOE_MIN_MW`). Ilma tokenita Nord Pooli UMM-ist, kus aga
+  Eesti jaamade teateid on vaid 2025. aasta alguseni — siis jääb tunnus automaatselt välja.
 * **Automaatne tunnuste valik:** valikulised tunnused, millel treeningandmetes sisu pole
   (alla 1% erinevaid väärtusi), jäetakse välja. Kasutatud tunnused: `meta.holdout.features`.
 * Üle 60 päeva kestvad "katkestused" (konserveeritud jaamad) jäetakse välja (`MAX_OUTAGE_DAYS`).
@@ -266,9 +290,7 @@ docker compose exec forecaster python -m voltee.run
 
 * **Hinnapiigid** (äkilised rikked, tuulevaikus + pakane) jäävad sageli mööda. Suund
   ("reede odav, esmaspäev kallis") tuleb tavaliselt hästi välja.
-* **Eesti jaamad (Auvere, Narva plokid):** Nord Pooli UMM-is on neid teateid vaid 2025. aasta
-  alguseni, seega tunnus `gen_out_ee` jääb praegu automaatselt välja. Lahendus on
-  ENTSO-E Transparency Platform (vt edasiarendus).
+* **Eesti jaamad** vajavad ENTSO-E tokenit (vt paigaldus). Ilma selleta jäävad need välja.
 * **Kaugemate päevade vahemik** võib olla liiga kitsas, sest mudel usaldab Soome prognoosi.
 * Ülekandeühenduste suuri katkestusi on ajaloos vähe — mõju võib olla alahinnatud.
 
@@ -282,6 +304,8 @@ docker compose exec forecaster python -m voltee.run
 | `HORIZON_DAYS` | `7` | mitu päeva ette |
 | `TRAIN_START` | `2025-02-09` | treeningandmete algus |
 | `MAX_OUTAGE_DAYS` | `60` | pikemad UMM-katkestused jäetakse välja |
+| `ENTSOE_TOKEN` | — | ENTSO-E token (pane faili `.env`) |
+| `ENTSOE_MIN_MW` | `20` | väiksemaid jaama-katkestusi ei arvestata |
 | `FI_FORECAST_URL` | Sähkövatkaini `prediction.json` | Soome prognoos |
 | `DATA_DIR` | `/data` (Dockeris) | andmete ja puhvri kaust |
 
@@ -297,6 +321,7 @@ Puhvri saab julgelt kustutada (`rm -rf data/cache`); see laetakse uuesti.
 | HA andur on `unknown` | ava brauseris `http://SERVERI_IP:8088/forecast.json`; kontrolli IP-d ja porti |
 | homne päev pole `confirmed` | Nord Pool / Elering hilines; järgmine ajakava käivitus võtab selle |
 | `Ülekandevõimsusi ei saanud` / `UMM-teateid ei saanud` | ajutine võrguviga; mudel töötab edasi ilma nende tunnusteta |
+| `ENTSO-E: token ei kehti (401)` | kontrolli `.env` faili; token peab olema ilma jutumärkideta |
 | `volt_import` tagastab `{}` | `sensor.elektrihind_ee_prognoos` ei tööta või mallid laadimata |
 
 Ilma Dockerita / testimiseks:
@@ -309,13 +334,12 @@ python -m voltee.run --demo   # sünteetilised andmed, võrku pole vaja
 
 ## 10. Edasiarendus
 
-* **ENTSO-E Transparency Platform** (tasuta token): Eesti jaamade katkestused, tarbimis- ja
-  tuuletoodangu prognoos.
+* ENTSO-E: Eesti tarbimis- ja tuuletoodangu prognoos tunnusteks.
 * Soome hinna müra treenimisel, et kaugemate päevade vahemik oleks realistlikum.
 * Läti/Leedu hinnapiirkonnad.
 
 Koodi struktuur: `voltee/config.py` (seaded, ilmapunktid), `fetch.py` (andmeallikad),
-`model.py` (tunnused, mudel), `run.py` (käivitus, JSON, ajakava), `diag.py` (diagnostika),
+`entsoe_src.py` (ENTSO-E), `model.py` (tunnused, mudel), `run.py` (käivitus, JSON, ajakava), `diag.py` (diagnostika),
 `demo.py` (sünteetilised testandmed).
 
 ---
@@ -326,5 +350,6 @@ Koodi struktuur: `voltee/config.py` (seaded, ilmapunktid), `fetch.py` (andmealli
 * [Elering](https://dashboard.elering.ee) — hinnad ja ülekandevõimsused
 * [Open-Meteo](https://open-meteo.com) — ilmaandmed (CC BY 4.0; tasuta mitteäriliseks kasutuseks)
 * [Nord Pool UMM](https://umm.nordpoolgroup.com) — turuteated
+* [ENTSO-E Transparency Platform](https://transparency.entsoe.eu) ja [entsoe-py](https://github.com/EnergieID/entsoe-py) — jaamade katkestused
 
 Prognoos on mudeli väljund, mitte finantsnõuanne.
