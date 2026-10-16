@@ -219,8 +219,20 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
   Uuemaid andmeid kaalutakse rohkem (poolestusaeg 180 päeva), sest turg muutus pärast
   Balti sünkroniseerimist (02/2025) ja 15-min hindu (10/2025).
 * **Tunnused:** kellaaeg, nädalapäev, hooaeg, Eesti riigipühad, tuul (EE/LV/FI + 6 h keskmine),
-  temperatuur (EE/FI), päike, **Soome hind** (treenimisel tegelik, ennustamisel Sähkövatkaini
-  prognoos; kus see ei ulatu, kasutatakse baasmudelit — JSON-is `"model": "base"`).
+  temperatuur (EE/FI), päike, **Soome hind** ja `fi_h` (mitu päeva ette Soome hind on prognoos).
+* **Soome prognoosi viga on sisse arvestatud.** Sähkövatkaini tegelik viga mõõdeti nende
+  git-ajaloo 1429 prognoosist (12/2025–10/2026, 113 000 tundi):
+
+  | päeva ette | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+  |---|---|---|---|---|---|---|---|
+  | viga €/MWh | 18,9 | 22,0 | 25,9 | 28,9 | 30,2 | 31,1 | 32,5 |
+
+  Treenimisel lisatakse Soome hinnale sellise suurusega müra (kasvab ka hinnatasemega),
+  nii et mudel ei usalda kaugemat Soome prognoosi pimesi ja vahemik laieneb realistlikult.
+  Holdout-test tehakse sama müraga, tulemus päevade kaupa: `meta.holdout.full.mae_by_day`.
+* **Mudeli valik päevade kaupa:** kui mõnel päeval on Soome hinnata baasmudel holdout-testis
+  üle 2% parem, kasutatakse seal seda. Ka seal, kuhu Sähkövatkaini prognoos ei ulatu
+  (JSON-is `"model": "base"`).
 * **Ülekandeühendused** (`cap_fi`, `cap_lv`, MW): ajalugu ja homne päev Eleringist;
   kaugemale tavavõimsus (30 p mediaan) miinus UMM-teadetes teada olevad katkestused.
   Sama üksuse kattuvaid teateid ei liideta; summa piiratakse füüsilise võimsusega.
@@ -269,9 +281,9 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
 
 ## 6. Täpsus ja diagnostika
 
-* **`meta.holdout`** — viga viimasel 30 päeval. Võrdle `naive_week_ago_mae`-ga
-  ("sama tund nädal tagasi"); mudel peab olema selgelt parem.
-  NB: holdout kasutab Soome *tegelikku* hinda, seega on päris viga suurem.
+* **`meta.holdout`** — viga viimasel 30 päeval, mida mudel ei näinud. Soome hinnale on
+  lisatud Sähkövatkaini tegelik viga, seega on number realistlik. `mae_by_day` päevade kaupa.
+  Võrdle `naive_week_ago_mae`-ga ("sama tund nädal tagasi"); mudel peab olema selgelt parem.
 * **`meta.live_mae_by_day_ahead`** — iga käivituse ennustused logitakse
   (`data/cache/prediction_log.csv`) ja võrreldakse hiljem päris hindadega.
   **Ausaim mõõdik**; täitub mõne päevaga. Võti = mitu päeva ette (1 = homme).
@@ -294,7 +306,6 @@ docker compose exec forecaster python -m voltee.run
 * **Hinnapiigid** (äkilised rikked, tuulevaikus + pakane) jäävad sageli mööda. Suund
   ("reede odav, esmaspäev kallis") tuleb tavaliselt hästi välja.
 * **Eesti jaamad** vajavad ENTSO-E tokenit (vt paigaldus). Ilma selleta jäävad need välja.
-* **Kaugemate päevade vahemik** võib olla liiga kitsas, sest mudel usaldab Soome prognoosi.
 * Ülekandeühenduste suuri katkestusi on ajaloos vähe — mõju võib olla alahinnatud.
 
 ---
@@ -338,7 +349,6 @@ python -m voltee.run --demo   # sünteetilised andmed, võrku pole vaja
 ## 10. Edasiarendus
 
 * ENTSO-E: Eesti tarbimis- ja tuuletoodangu prognoos tunnusteks.
-* Soome hinna müra treenimisel, et kaugemate päevade vahemik oleks realistlikum.
 * Läti/Leedu hinnapiirkonnad.
 
 Koodi struktuur: `voltee/config.py` (seaded, ilmapunktid), `fetch.py` (andmeallikad),

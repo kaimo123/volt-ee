@@ -84,7 +84,11 @@ def forecast(df: pd.DataFrame, outages: list | None = None) -> dict:
     end = start + pd.Timedelta(days=config.HORIZON_DAYS + 1)
     fut = frame[(frame.index >= start) & (frame.index < end)].dropna(subset=model.REQUIRED_FEATURES)
 
-    use_full = fut["fi_price"].notna()
+    # Soome hinnaga mudel ainult päevadel, kus see oli holdout-testis vähemalt sama hea kui ilma
+    by_day = metrics.get("full", {}).get("mae_by_day", {})
+    base_mae = metrics.get("base", {}).get("mae")
+    better = {int(h): (base_mae is None or v <= base_mae * 1.02) for h, v in by_day.items()}
+    use_full = fut["fi_price"].notna() & fut["fi_h"].map(lambda h: h == 0 or better.get(int(h), True))
     pred = np.full((len(fut), 3), np.nan)
     if use_full.any():
         pred[use_full.to_numpy()] = model.predict(full, fut.loc[use_full, full_f])
