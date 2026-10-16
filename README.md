@@ -256,9 +256,11 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
     "generated_at_utc": "2026-10-15T12:12:39Z",
     "unit": "EUR/MWh (ilma km-ta, börsihind)",
     "holdout": {                      // viimase 30 päeva test, mida mudel ei näinud
-      "full": {"mae": 21.2, "coverage_p10_p90": 0.69, "naive_week_ago_mae": 63.1},
-      "base": {"mae": 29.6, "coverage_p10_p90": 0.74, "naive_week_ago_mae": 63.1},
-      "features": ["hour", "...", "cap_fi", "cap_lv", "fi_price"]
+      "full": {"mae": 30.9, "coverage_p10_p90": 0.71, "naive_week_ago_mae": 63.1,
+               "mae_by_day": {"1": 29.5, "2": 30.0, "3": 30.4, "4": 31.3, "5": 31.9, "6": 31.5, "7": 31.6}},
+      "base": {"mae": 32.3, "coverage_p10_p90": 0.74, "naive_week_ago_mae": 63.1},
+      "features": ["hour", "...", "cap_fi", "cap_lv", "gen_out_ee", "fi_price", "fi_h"],
+      "ablation_mae": {"with": 30.9, "without": 30.3}
     },
     "live_mae_by_day_ahead": {"1": 25.3, "2": 38.0},  // päris ennustuste viga päevade kaupa
     "outages": [{"border": "EE-FI", "name": "Estlink 2", "start": "2026-10-18T03:00",
@@ -288,6 +290,9 @@ iga käivitusega uuesti, nii et kui homsed hinnad saabuvad, kasutatakse kohe nei
   (`data/cache/prediction_log.csv`) ja võrreldakse hiljem päris hindadega.
   **Ausaim mõõdik**; täitub mõne päevaga. Võti = mitu päeva ette (1 = homme).
 * **`coverage_p10_p90`** peaks olema ~0,8.
+
+Tüüpiline tulemus (10/2026): viga ~30 €/MWh 1. päeval kuni ~32 €/MWh 7. päeval, naiivne
+"nädal tagasi" ~63 €/MWh — mudel on umbes kaks korda täpsem.
 
 Diagnostika (UMM-teated, katkestuste statistika, eelseisvad katkestused):
 ```bash
